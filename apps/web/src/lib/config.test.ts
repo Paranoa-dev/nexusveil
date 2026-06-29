@@ -113,6 +113,7 @@ test("custom config with no optional keys still passes critical check", () => {
   assert.equal(critical.length, 0);
 });
 
+
 // --- URL normalization regression tests ---
 
 test("normalizeUrl strips a single trailing slash", () => {
