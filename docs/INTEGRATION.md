@@ -2,7 +2,7 @@
 
 Sub Rosa does not require users to come to the Sub Rosa demo app. The demo app
 is a showcase. The intended product surface is a Soroban contract plus
-TypeScript packages that other Stellar apps can embed.
+TypeScript packages that auction and competitive-bid apps can embed.
 
 ## Target integration
 
@@ -55,16 +55,22 @@ await client.commit({
 ```
 
 After Drand round `R` is published, any keeper or participant can submit the
-Drand signature, reveal valid entries, clear the round, and settle escrow.
+Drand signature, reveal valid bids, clear the auction, pay the operator from
+winner escrow, and refund losing escrow.
 
-## Allocation use cases
+## Primary use case
 
-- SCF-style grant allocation: judges cannot react to leaked scores
-- Hackathon judging: panel scores open together after judging closes
-- Bounty distribution: reviews and allocation inputs stay sealed
-- RFP scoring: vendors and evaluators cannot tune inputs from visible competitors
-- Sealed auctions: bids remain unreadable before close
-- DAO/community allocation: demand signals and ballots do not leak during the window
+The focused integration target is an escrow-backed sealed auction:
+
+- bids remain unreadable before close;
+- the winning bid is paid from escrow;
+- losers are refunded deterministically;
+- the operator cannot read bids early or choose who settles;
+- the final receipt is public and verifiable.
+
+Future templates can adapt the same primitive to grants, judging, RFPs, DAO
+polls, or allocation workflows, but those do not lead the current SCF
+resubmission.
 
 ## Hosted vs embedded
 
