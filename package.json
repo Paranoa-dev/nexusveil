@@ -2,7 +2,7 @@
   "name": "sub-rosa",
   "version": "0.1.0",
   "private": true,
-  "description": "Verifiable allocation infrastructure for Stellar grants, hackathons, bounties, RFPs, and sealed auctions.",
+  "description": "Escrow-backed sealed auction infrastructure for Stellar.",
   "license": "MIT",
   "packageManager": "pnpm@10.13.1",
   "engines": {

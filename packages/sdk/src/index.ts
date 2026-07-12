@@ -15,9 +15,20 @@ export {
   type TransactionSubmitter,
 } from "./submitter.js";
 export { MAINNET_ARTIFACTS, MAINNET_MICRO_MAX_ESCROW } from "./mainnet-artifacts.js";
+export {
+  buildRoundReceipt,
+  formatReceiptText,
+  computeEntrySettlement,
+  type RoundReceipt,
+  type ReceiptEntry,
+  type RoundTxRefs,
+  type RoundStatusTag,
+  type BuildReceiptOptions,
+} from "./receipt.js";
 
 // Re-export the generated contract types so consumers get spec-accurate shapes
 // from a single import surface.
+
 export {
   Client as RoundContract,
   Errors as RoundErrors,
