@@ -175,15 +175,13 @@ function PhaseGuide(props: {
         ? "Cast your sealed ballot"
         : useCase.inputKind === "score"
           ? "Submit your sealed score"
-          : useCase.id === "bounty"
-            ? "Place your sealed bid"
-            : "Submit your sealed allocation";
+          : "Place your sealed bid";
     detail =
       useCase.inputKind === "ballot"
         ? "Pick an option and seal it before the window closes. Encrypted to Drand R."
         : useCase.inputKind === "score"
           ? "Move the slider to your score and seal. Other judges cannot see it until R."
-          : "Choose an amount and seal. The number is encrypted to Drand R until reveal.";
+          : "Choose an amount and seal it with escrow. The bid is encrypted to Drand R until reveal.";
     timerLabel = "Time left";
     timerValue = formatCountdown(commitSeconds);
     ctaLabel = useCase.commitCta;
@@ -897,7 +895,7 @@ export function DemoPage({
 
           {mode === "live" ? (
             <>
-              <div className="case-nav-section-label">Cases</div>
+              <div className="case-nav-section-label">Focus</div>
               {USE_CASES.map((item) => (
                 <button
                   key={item.id}

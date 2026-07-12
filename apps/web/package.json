@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Jury demo UI — lifecycle, observer, agents, x402, keeper, seal-off vs seal-on attack, mandate cap safety lab.",
+  "description": "Sealed auction demo UI — lifecycle, observer, agents, x402, keeper, seal-off vs seal-on attack, mandate cap safety lab.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
