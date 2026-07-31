@@ -118,6 +118,17 @@ export function useWalletContract(address: string | null) {
   }, [address]);
 }
 
+export function useReadOnlyContract() {
+  return useMemo(() => {
+    if (!CONTRACT_ID) return null;
+    return new RoundContract({
+      contractId: CONTRACT_ID,
+      networkPassphrase: NETWORK,
+      rpcUrl: RPC_URL,
+    });
+  }, []);
+}
+
 export async function resolveFreighterAddress(
   access: { address?: string; publicKey?: string },
 ): Promise<string> {

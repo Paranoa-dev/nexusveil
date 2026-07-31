@@ -53,9 +53,9 @@ export function LandingPage({
           <a href="#/dashboard" className="secondary-action compact">
             Dashboard
           </a>
-          <button type="button" className="primary-action compact" onClick={onDemo}>
-            Open demo
-          </button>
+          <a href="#/pilot" className="primary-action compact">
+            Pilot workspace
+          </a>
         </div>
       </motion.nav>
 
@@ -97,6 +97,9 @@ export function LandingPage({
             </button>
             <a className="secondary-action" href="#/architecture">
               Read the architecture
+            </a>
+            <a className="secondary-action" href="#/pilot">
+              Run a testnet pilot
             </a>
           </motion.div>
 

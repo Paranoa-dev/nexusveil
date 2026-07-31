@@ -26,7 +26,7 @@ stay in sync with `contracts/round/src/types.rs`.
 | --- | --- |
 | 1–4     | Initialization & state lookup |
 | 10–22   | Lifecycle & timing |
-| 30–39   | Cryptography & validation |
+| 30–43   | Cryptography & validation |
 
 ## Initialization & state lookup (1–4)
 
@@ -55,7 +55,7 @@ stay in sync with `contracts/round/src/types.rs`.
 | 21 | `NotVoidable` | `void` | Round is past the `Open` status, or `now <= reveal_deadline + VOID_GRACE` (3600 s). | The round cannot be voided from its current state, or the grace window has not elapsed yet. | Either complete the normal lifecycle, or wait until `reveal_deadline + 1 hour` and try `void` again. |
 | 22 | `WrongStatus` | `commit` | `round.status != Status::Open`. | A bid can only be submitted to a round in the Open status. | Start a new round; a Revealing/Cleared/Settled/Voided round no longer accepts commits. |
 
-## Cryptography & validation (30–39)
+## Cryptography & validation (30–43)
 
 | Code | Variant | Raised by | Trigger | User-facing message | Suggested next action |
 | ---: | --- | --- | --- | --- | --- |
@@ -63,12 +63,16 @@ stay in sync with `contracts/round/src/types.rs`.
 | 31 | `HashMismatch` | `reveal` | `sha256(be16(value) ‖ nonce) != state.commitment`. | The revealed bid does not hash to the committed commitment. | Re-derive `(value, nonce)` from the original sealing preimage that produced `H`. Reveal with the exact preimage; do not retry with arbitrary values. |
 | 32 | `AlreadyRevealed` | `reveal` | `state.revealed_value.is_some()`. | A reveal has already been recorded for this bidder on this round. | No action — the recorded reveal stands. Repeated reveals are rejected on purpose to prevent front-running by a third party. |
 | 33 | `PayloadTooLarge` | `create_round`, `commit` | One of: `auditor_pubkey.len() > 1024`, `ciphertext.len() > 4096`, `auditor_blob.len() > 2048`. | One of the submitted payloads is larger than the contract's size limit. | Shrink the offending payload: ciphertext ≤ 4096 B, auditor public key ≤ 1024 B, auditor blob ≤ 2048 B. |
-| 34 | `InvalidAmount` | `create_round`, `commit` | `reveal_round == 0` (in `create_round`) or `escrow <= 0` (in `commit`). | The amount or value supplied is not positive. | Pass a positive integer; for `create_round`, use `reveal_round != 0` and a future `commit_deadline`. |
+| 34 | `InvalidAmount` | `create_round`, `create_round_v2`, `commit` | `reveal_round == 0`, `escrow <= 0`, or an `Auction` settlement config omits its payment asset, lot asset, or positive lot amount. | The amount or auction settlement configuration is invalid. | Use positive amounts. Auction rounds must name both SAC addresses and custody a positive lot amount. |
 | 35 | `BidExceedsEscrow` | `reveal` | `value > state.escrow` after the commitment hash matches. | The revealed bid exceeds the escrowed amount. | Re-commit with escrow ≥ the sealed bid before the commit deadline, or reveal the exact committed value that fits under escrow. |
 | 36 | `DeadlineInPast` | `create_round` | `commit_deadline <= now` (ledger time at submission). | The commit deadline is in the past. | Use a future timestamp; check ledger time at submission, since Drand round R must be strictly after `commit_deadline`. |
 | 37 | `NoValidBids` | `settle` | `round.winner` is `None` on a round whose status is `Cleared`. | Round has no winner to settle against. | Investigate: under current behavior the contract transitions to `Voided` (with all escrow refunded) when no valid bid is revealed, so this code should not appear in normal flow. If it does, the round is in an inconsistent state and warrants a manual review. |
 | 38 | `RoundFull` | `commit` | `round.bidders.len() >= MAX_BIDDERS` (500). | The round has reached its bidder cap. | Start a new round to accept further bidders. |
 | 39 | `InvalidLimit` | `get_bidders_page` | `limit == 0` or `limit > 100`. | Page size must be between 1 and 100 (inclusive). | Pass a `limit` in `[1, 100]`; use `next_cursor` from the previous page to walk larger rounds. |
+| 40 | `UnsupportedVersion` | `commit_v2`, `reveal_v2` | Stored Core version or payload envelope version is not supported by this deployment. | This round or submission uses an unsupported protocol version. | Use Core v2 with payload envelope v1, or target a deployment that supports the requested version. |
+| 41 | `MalformedPayload` | `reveal_v2` | Envelope magic, flags, reserved bytes, declared length, canonical zero fields, or required auction amount is invalid. | The revealed structured payload is malformed or non-canonical. | Re-open the original ciphertext with `@sub-rosa/tlock` and submit the exact canonical envelope bytes. |
+| 42 | `EscrowNotAllowed` | `create_round_v2`, `commit_v2`, `reveal_v2` | A `ReceiptOnly` round configured payment/lot settlement or received non-zero escrow. | Receipt-only rounds do not accept or move assets. | Omit settlement assets and submit with `escrow = 0`, or create an `Auction` round when atomic settlement is required. |
+| 43 | `RoundDurationTooLong` | `create_round_v2` | `reveal_deadline - now` exceeds the supported 30-day Core v2 duration. | The requested round duration exceeds the supported storage and liveness window. | Choose deadlines within 30 days of the creation ledger timestamp. |
 
 ## How to use this table
 

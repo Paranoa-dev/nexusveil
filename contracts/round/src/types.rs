@@ -35,6 +35,10 @@ pub enum Error {
     NoValidBids = 37,
     RoundFull = 38,
     InvalidLimit = 39,
+    UnsupportedVersion = 40,
+    MalformedPayload = 41,
+    EscrowNotAllowed = 42,
+    RoundDurationTooLong = 43,
 }
 
 /// Round lifecycle. Mirrors the state machine in PRD §6.
@@ -55,6 +59,27 @@ pub enum Status {
 pub enum ClearingRule {
     HighestBid,
     LowestBid,
+}
+
+/// Core v2 lifecycle behavior. Auction rounds escrow and settle funds;
+/// ReceiptOnly rounds only prove simultaneous reveal and finalize a receipt.
+#[contracttype]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RoundMode {
+    Auction,
+    ReceiptOnly,
+}
+
+/// Round-scoped settlement policy. Keeping this as one contract argument
+/// preserves Soroban's ten-argument entry-point limit while making custody
+/// requirements explicit for Auction rounds.
+#[contracttype]
+#[derive(Clone)]
+pub struct SettlementConfig {
+    pub mode: RoundMode,
+    pub payment_asset: Option<Address>,
+    pub lot_asset: Option<Address>,
+    pub lot_amount: i128,
 }
 
 /// Contract-global configuration, set once at deploy in Instance storage.
@@ -98,6 +123,32 @@ pub struct Round {
     pub winning_bid: i128,
 }
 
+/// Versioned round record stored separately from deployed v1 round state.
+#[contracttype]
+#[derive(Clone)]
+pub struct RoundV2 {
+    pub protocol_version: u32,
+    pub schema_ref: BytesN<32>,
+    pub mode: RoundMode,
+    pub operator: Address,
+    pub item_ref: BytesN<32>,
+    /// SAC used for bidder escrow and seller payment in Auction mode.
+    pub payment_asset: Option<Address>,
+    /// SAC held in custody and transferred atomically to the winner.
+    pub lot_asset: Option<Address>,
+    pub lot_amount: i128,
+    pub reveal_round: u64,
+    pub clearing_rule: ClearingRule,
+    pub commit_deadline: u64,
+    pub reveal_deadline: u64,
+    pub auditor_pubkey: Bytes,
+    pub max_participants: u32,
+    pub status: Status,
+    pub bidders: Vec<Address>,
+    pub winner: Option<Address>,
+    pub winning_bid: i128,
+}
+
 /// Per-bid durable state (Persistent). Holds everything required to clear and
 /// settle / refund safely, even if the ephemeral ciphertext has expired.
 #[contracttype]
@@ -112,6 +163,20 @@ pub struct BidState {
     /// that offline receipt verifiers can recompute sha256(be16(value)‖nonce)
     /// without trusting the exporter.
     pub revealed_nonce: Option<BytesN<32>>,
+    pub valid: bool,
+    pub settled: bool,
+}
+
+/// Durable Core v2 submission state. The complete canonical envelope is
+/// persisted after reveal so receipts can verify every committed application
+/// byte without trusting an exporter.
+#[contracttype]
+#[derive(Clone)]
+pub struct SubmissionStateV2 {
+    pub commitment: BytesN<32>,
+    pub escrow: i128,
+    pub revealed_envelope: Option<Bytes>,
+    pub revealed_amount: Option<i128>,
     pub valid: bool,
     pub settled: bool,
 }
@@ -147,4 +212,7 @@ pub enum DataKey {
     Round(u64),
     State(u64, Address),
     Seal(u64, Address),
+    RoundV2(u64),
+    SubmissionV2(u64, Address),
+    SealV2(u64, Address),
 }

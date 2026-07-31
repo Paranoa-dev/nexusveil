@@ -11,6 +11,7 @@
 //! No mocks, no fallbacks: every gate is a real on-chain check.
 
 mod drand;
+mod payload;
 mod storage;
 mod types;
 
@@ -32,6 +33,11 @@ const MAX_BIDDERS: u32 = 500;
 const VOID_GRACE: u64 = 3600;
 /// Maximum page size for paginated getters. Prevents resource exhaustion.
 const MAX_PAGE_SIZE: u32 = 100;
+/// Core v2 deliberately caps cohorts so clear/refund/settlement remain within
+/// a measured, reviewable resource envelope until claim-based settlement ships.
+const MAX_V2_PARTICIPANTS: u32 = 25;
+const MAX_ROUND_DURATION_SECS: u64 = 30 * 24 * 60 * 60;
+const CORE_V2_VERSION: u32 = 2;
 
 #[contract]
 pub struct SubRosaRound;
@@ -460,6 +466,476 @@ impl SubRosaRound {
         Ok(())
     }
 
+    // ---- Core v2 -----------------------------------------------------------
+
+    /// Create a versioned structured-submission round. V2 state uses separate
+    /// storage keys, so deployed v1 rounds and methods remain readable.
+    pub fn create_round_v2(
+        env: Env,
+        operator: Address,
+        item_ref: BytesN<32>,
+        schema_ref: BytesN<32>,
+        settlement: SettlementConfig,
+        reveal_round: u64,
+        clearing_rule: ClearingRule,
+        commit_deadline: u64,
+        reveal_deadline: u64,
+        auditor_pubkey: Bytes,
+        max_participants: u32,
+    ) -> Result<u64, Error> {
+        operator.require_auth();
+        let SettlementConfig {
+            mode,
+            payment_asset,
+            lot_asset,
+            lot_amount,
+        } = settlement;
+        let config = get_config(&env)?;
+        bump_instance(&env);
+
+        if reveal_round == 0 {
+            return Err(Error::InvalidAmount);
+        }
+        if max_participants == 0 || max_participants > MAX_V2_PARTICIPANTS {
+            return Err(Error::InvalidLimit);
+        }
+        if auditor_pubkey.len() > MAX_AUDITOR_PUBKEY {
+            return Err(Error::PayloadTooLarge);
+        }
+
+        let now = env.ledger().timestamp();
+        let t_reveal = drand::time_of_round(&config, reveal_round);
+        if commit_deadline >= t_reveal || reveal_deadline <= t_reveal {
+            return Err(Error::CommitDeadlineAfterReveal);
+        }
+        if commit_deadline <= now {
+            return Err(Error::DeadlineInPast);
+        }
+        if reveal_deadline.saturating_sub(now) > MAX_ROUND_DURATION_SECS {
+            return Err(Error::RoundDurationTooLong);
+        }
+
+        match mode {
+            RoundMode::Auction => {
+                if payment_asset.is_none() || lot_asset.is_none() || lot_amount <= 0 {
+                    return Err(Error::InvalidAmount);
+                }
+            }
+            RoundMode::ReceiptOnly => {
+                if payment_asset.is_some() || lot_asset.is_some() || lot_amount != 0 {
+                    return Err(Error::EscrowNotAllowed);
+                }
+            }
+        }
+
+        if let Some(asset) = lot_asset.clone() {
+            let lot = token::Client::new(&env, &asset);
+            lot.transfer(
+                &operator,
+                &env.current_contract_address(),
+                &lot_amount,
+            );
+        }
+
+        let round_id = next_round_id(&env);
+        let round = RoundV2 {
+            protocol_version: CORE_V2_VERSION,
+            schema_ref,
+            mode,
+            operator: operator.clone(),
+            item_ref,
+            payment_asset,
+            lot_asset,
+            lot_amount,
+            reveal_round,
+            clearing_rule,
+            commit_deadline,
+            reveal_deadline,
+            auditor_pubkey,
+            max_participants,
+            status: Status::Open,
+            bidders: Vec::new(&env),
+            winner: None,
+            winning_bid: 0,
+        };
+        set_round_v2(&env, round_id, &round);
+        env.events().publish(
+            (symbol_short!("createdv2"), round_id),
+            (operator, mode, reveal_round, commit_deadline),
+        );
+        Ok(round_id)
+    }
+
+    /// Commit a full structured payload hash. Auction rounds require escrow;
+    /// receipt-only rounds reject escrow and never touch the token contract.
+    pub fn commit_v2(
+        env: Env,
+        round_id: u64,
+        bidder: Address,
+        commitment: BytesN<32>,
+        ciphertext: Bytes,
+        escrow: i128,
+        auditor_blob: Bytes,
+    ) -> Result<(), Error> {
+        bidder.require_auth();
+        let _config = get_config(&env)?;
+        let mut round = get_round_v2(&env, round_id)?;
+        if round.protocol_version != CORE_V2_VERSION {
+            return Err(Error::UnsupportedVersion);
+        }
+        if round.status == Status::Voided {
+            return Err(Error::RoundVoided);
+        }
+        if round.status == Status::Settled {
+            return Err(Error::AlreadySettled);
+        }
+        if round.status != Status::Open {
+            return Err(Error::WrongStatus);
+        }
+        if env.ledger().timestamp() > round.commit_deadline {
+            return Err(Error::CommitClosed);
+        }
+        match round.mode {
+            RoundMode::Auction if escrow <= 0 => return Err(Error::InvalidAmount),
+            RoundMode::ReceiptOnly if escrow != 0 => return Err(Error::EscrowNotAllowed),
+            _ => {}
+        }
+        if ciphertext.len() > MAX_CIPHERTEXT || auditor_blob.len() > MAX_AUDITOR_BLOB {
+            return Err(Error::PayloadTooLarge);
+        }
+
+        let contract = env.current_contract_address();
+        match try_get_submission_v2(&env, round_id, &bidder) {
+            Some(previous) => {
+                if previous.escrow > 0 {
+                    let payment_asset = round
+                        .payment_asset
+                        .clone()
+                        .ok_or(Error::InvalidAmount)?;
+                    let token = token::Client::new(&env, &payment_asset);
+                    token.transfer(&contract, &bidder, &previous.escrow);
+                }
+            }
+            None => {
+                if round.bidders.len() >= round.max_participants {
+                    return Err(Error::RoundFull);
+                }
+                round.bidders.push_back(bidder.clone());
+            }
+        }
+        if escrow > 0 {
+            let payment_asset = round
+                .payment_asset
+                .clone()
+                .ok_or(Error::InvalidAmount)?;
+            let token = token::Client::new(&env, &payment_asset);
+            token.transfer(&bidder, &contract, &escrow);
+        }
+
+        set_submission_v2(
+            &env,
+            round_id,
+            &bidder,
+            &SubmissionStateV2 {
+                commitment,
+                escrow,
+                revealed_envelope: None,
+                revealed_amount: None,
+                valid: false,
+                settled: false,
+            },
+        );
+        set_seal_v2(
+            &env,
+            round_id,
+            &bidder,
+            &Seal {
+                ciphertext,
+                auditor_blob,
+            },
+            round.reveal_deadline,
+        );
+        set_round_v2(&env, round_id, &round);
+        env.events()
+            .publish((symbol_short!("commitv2"), round_id), (bidder, escrow));
+        Ok(())
+    }
+
+    pub fn open_reveal_v2(
+        env: Env,
+        round_id: u64,
+        drand_signature: BytesN<96>,
+    ) -> Result<(), Error> {
+        let config = get_config(&env)?;
+        let mut round = get_round_v2(&env, round_id)?;
+        if round.status == Status::Settled {
+            return Err(Error::AlreadySettled);
+        }
+        if round.status == Status::Voided {
+            return Err(Error::RoundVoided);
+        }
+        if round.status == Status::Cleared {
+            return Err(Error::AlreadyCleared);
+        }
+        if round.status != Status::Open {
+            return Err(Error::RevealAlreadyOpen);
+        }
+        if env.ledger().timestamp() <= round.commit_deadline {
+            return Err(Error::CommitNotClosed);
+        }
+        if !drand::verify_round(&env, &config, round.reveal_round, &drand_signature) {
+            return Err(Error::InvalidDrandSignature);
+        }
+
+        round.status = Status::Revealing;
+        extend_round_seals_v2(&env, round_id, &round.bidders, round.reveal_deadline);
+        set_round_v2(&env, round_id, &round);
+        env.events()
+            .publish((symbol_short!("revealv2"), round_id), round.reveal_round);
+        Ok(())
+    }
+
+    /// Reveal the complete canonical envelope. The contract hashes every byte,
+    /// then interprets only the versioned amount field required for clearing.
+    pub fn reveal_v2(
+        env: Env,
+        round_id: u64,
+        bidder: Address,
+        envelope: Bytes,
+    ) -> Result<(), Error> {
+        let round = get_round_v2(&env, round_id)?;
+        if round.status == Status::Settled {
+            return Err(Error::AlreadySettled);
+        }
+        if round.status == Status::Voided {
+            return Err(Error::RoundVoided);
+        }
+        if round.status != Status::Revealing {
+            return Err(Error::RevealNotOpen);
+        }
+        if env.ledger().timestamp() > round.reveal_deadline {
+            return Err(Error::RevealWindowClosed);
+        }
+
+        let mut state = get_submission_v2(&env, round_id, &bidder)?;
+        if state.revealed_envelope.is_some() {
+            return Err(Error::AlreadyRevealed);
+        }
+        let computed = env.crypto().sha256(&envelope).to_bytes();
+        if computed != state.commitment {
+            return Err(Error::HashMismatch);
+        }
+        let decoded = payload::decode_envelope(&env, &envelope)?;
+
+        match round.mode {
+            RoundMode::Auction => {
+                let amount = decoded.amount.ok_or(Error::MalformedPayload)?;
+                if amount <= 0 {
+                    return Err(Error::InvalidAmount);
+                }
+                if amount > state.escrow {
+                    return Err(Error::BidExceedsEscrow);
+                }
+            }
+            RoundMode::ReceiptOnly => {
+                if state.escrow != 0 {
+                    return Err(Error::EscrowNotAllowed);
+                }
+            }
+        }
+
+        state.revealed_amount = decoded.amount;
+        state.revealed_envelope = Some(envelope);
+        state.valid = true;
+        set_submission_v2(&env, round_id, &bidder, &state);
+        env.events().publish(
+            (symbol_short!("openedv2"), round_id),
+            (bidder, decoded.amount.unwrap_or(0)),
+        );
+        Ok(())
+    }
+
+    /// Finalize a receipt-only round, or deterministically clear an auction.
+    pub fn clear_v2(env: Env, round_id: u64) -> Result<Option<Address>, Error> {
+        let mut round = get_round_v2(&env, round_id)?;
+        if round.status == Status::Cleared {
+            return Err(Error::AlreadyCleared);
+        }
+        if round.status == Status::Settled {
+            return Err(Error::AlreadySettled);
+        }
+        if round.status == Status::Voided {
+            return Err(Error::RoundVoided);
+        }
+        if round.status != Status::Revealing {
+            return Err(Error::RevealNotOpen);
+        }
+        if env.ledger().timestamp() <= round.reveal_deadline {
+            return Err(Error::RevealStillOpen);
+        }
+
+        if round.mode == RoundMode::ReceiptOnly {
+            for bidder in round.bidders.iter() {
+                if let Some(mut state) = try_get_submission_v2(&env, round_id, &bidder) {
+                    state.settled = true;
+                    set_submission_v2(&env, round_id, &bidder, &state);
+                }
+            }
+            round.status = Status::Settled;
+            set_round_v2(&env, round_id, &round);
+            env.events().publish(
+                (symbol_short!("finalv2"), round_id),
+                round.bidders.len(),
+            );
+            return Ok(None);
+        }
+
+        let mut winner: Option<Address> = None;
+        let mut best = 0i128;
+        let mut found = false;
+        for bidder in round.bidders.iter() {
+            let state = match try_get_submission_v2(&env, round_id, &bidder) {
+                Some(value) => value,
+                None => continue,
+            };
+            if !state.valid {
+                continue;
+            }
+            let amount = match state.revealed_amount {
+                Some(value) => value,
+                None => continue,
+            };
+            let better = if !found {
+                true
+            } else {
+                match round.clearing_rule {
+                    ClearingRule::HighestBid => amount > best,
+                    ClearingRule::LowestBid => amount < best,
+                }
+            };
+            if better {
+                best = amount;
+                winner = Some(bidder.clone());
+                found = true;
+            }
+        }
+
+        if !found {
+            round.status = Status::Voided;
+            set_round_v2(&env, round_id, &round);
+            refund_all_v2(&env, &round, round_id);
+            env.events()
+                .publish((symbol_short!("voidedv2"), round_id), 0u32);
+            return Ok(None);
+        }
+
+        round.winner = winner.clone();
+        round.winning_bid = best;
+        round.status = Status::Cleared;
+        set_round_v2(&env, round_id, &round);
+        env.events().publish(
+            (symbol_short!("clearedv2"), round_id),
+            (winner.clone(), best),
+        );
+        Ok(winner)
+    }
+
+    pub fn settle_v2(env: Env, round_id: u64) -> Result<(), Error> {
+        let _config = get_config(&env)?;
+        let mut round = get_round_v2(&env, round_id)?;
+        if round.status == Status::Settled {
+            return Err(Error::AlreadySettled);
+        }
+        if round.status == Status::Voided {
+            return Err(Error::RoundVoided);
+        }
+        if round.mode != RoundMode::Auction || round.status != Status::Cleared {
+            return Err(Error::NotCleared);
+        }
+        let winner = round.winner.clone().ok_or(Error::NoValidBids)?;
+        let payment_asset = round.payment_asset.clone().ok_or(Error::InvalidAmount)?;
+        let token = token::Client::new(&env, &payment_asset);
+        let contract = env.current_contract_address();
+
+        for bidder in round.bidders.iter() {
+            let mut state = match try_get_submission_v2(&env, round_id, &bidder) {
+                Some(value) => value,
+                None => continue,
+            };
+            if state.settled {
+                continue;
+            }
+            if bidder == winner {
+                token.transfer(&contract, &round.operator, &round.winning_bid);
+                let surplus = state.escrow - round.winning_bid;
+                if surplus > 0 {
+                    token.transfer(&contract, &bidder, &surplus);
+                }
+            } else if state.escrow > 0 {
+                token.transfer(&contract, &bidder, &state.escrow);
+            }
+            state.settled = true;
+            set_submission_v2(&env, round_id, &bidder, &state);
+        }
+
+        let lot_asset = round.lot_asset.clone().ok_or(Error::InvalidAmount)?;
+        token::Client::new(&env, &lot_asset).transfer(
+            &contract,
+            &winner,
+            &round.lot_amount,
+        );
+
+        round.status = Status::Settled;
+        set_round_v2(&env, round_id, &round);
+        env.events().publish(
+            (symbol_short!("settledv2"), round_id),
+            (winner, round.winning_bid),
+        );
+        Ok(())
+    }
+
+    pub fn void_v2(env: Env, round_id: u64) -> Result<(), Error> {
+        let mut round = get_round_v2(&env, round_id)?;
+        if round.status == Status::Voided {
+            return Err(Error::RoundVoided);
+        }
+        if round.status == Status::Settled {
+            return Err(Error::AlreadySettled);
+        }
+        if round.status != Status::Open
+            || env.ledger().timestamp() <= round.reveal_deadline.saturating_add(VOID_GRACE)
+        {
+            return Err(Error::NotVoidable);
+        }
+        round.status = Status::Voided;
+        set_round_v2(&env, round_id, &round);
+        refund_all_v2(&env, &round, round_id);
+        env.events()
+            .publish((symbol_short!("voidedv2"), round_id), 1u32);
+        Ok(())
+    }
+
+    pub fn get_round_v2(env: Env, round_id: u64) -> Result<RoundV2, Error> {
+        storage::get_round_v2(&env, round_id)
+    }
+
+    pub fn get_submission_v2(
+        env: Env,
+        round_id: u64,
+        bidder: Address,
+    ) -> Result<SubmissionStateV2, Error> {
+        storage::get_submission_v2(&env, round_id, &bidder)
+    }
+
+    pub fn get_bidders_v2(env: Env, round_id: u64) -> Result<Vec<Address>, Error> {
+        Ok(storage::get_round_v2(&env, round_id)?.bidders)
+    }
+
+    pub fn get_seal_v2(env: Env, round_id: u64, bidder: Address) -> Option<Seal> {
+        let round = storage::get_round_v2(&env, round_id).ok()?;
+        storage::get_seal_v2(&env, round_id, &bidder, round.reveal_deadline)
+    }
+
     // ---- Views ----
 
     pub fn get_round(env: Env, round_id: u64) -> Result<Round, Error> {
@@ -537,6 +1013,29 @@ fn refund_all(env: &Env, round: &Round, round_id: u64) {
                 set_state(env, round_id, &bidder, &state);
             }
         }
+    }
+}
+
+fn refund_all_v2(env: &Env, round: &RoundV2, round_id: u64) {
+    let contract = env.current_contract_address();
+    if let Some(payment_asset) = round.payment_asset.clone() {
+        let token = token::Client::new(env, &payment_asset);
+        for bidder in round.bidders.iter() {
+            if let Some(mut state) = try_get_submission_v2(env, round_id, &bidder) {
+                if !state.settled && state.escrow > 0 {
+                    token.transfer(&contract, &bidder, &state.escrow);
+                }
+                state.settled = true;
+                set_submission_v2(env, round_id, &bidder, &state);
+            }
+        }
+    }
+    if let Some(lot_asset) = round.lot_asset.clone() {
+        token::Client::new(env, &lot_asset).transfer(
+            &contract,
+            &round.operator,
+            &round.lot_amount,
+        );
     }
 }
 

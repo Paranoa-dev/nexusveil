@@ -1,6 +1,8 @@
 export {
   keepRound,
+  keepRoundV2,
   closeRound,
+  closeRoundV2,
   voidIfStale,
   discoverRoundIds,
   parseRoundIdSpec,

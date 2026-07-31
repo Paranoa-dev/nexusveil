@@ -8,12 +8,19 @@ import { SubRosaPreflightError } from "./errors.js";
 
 export type PreflightOperation =
   | "create_round"
+  | "create_round_v2"
   | "commit"
+  | "commit_v2"
   | "open_reveal"
+  | "open_reveal_v2"
   | "reveal"
+  | "reveal_v2"
   | "clear"
+  | "clear_v2"
   | "settle"
-  | "void";
+  | "settle_v2"
+  | "void"
+  | "void_v2";
 
 export interface PreflightFeeEstimate {
   /** Base transaction fee in stroops from the assembled transaction. */

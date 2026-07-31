@@ -173,6 +173,76 @@ describe("SubRosaClient source configuration", () => {
       },
     );
   });
+
+  it("rejects createRoundV2 without an operator source", async () => {
+    const client = new SubRosaClient(BASE_CONFIG);
+
+    await assert.rejects(
+      client.createRoundV2({
+        itemRef: new Uint8Array(32),
+        schemaRef: new Uint8Array(32),
+        mode: "ReceiptOnly",
+        revealRound: 1,
+        commitDeadline: 2,
+        revealDeadline: 3,
+        auditorPubkey: new Uint8Array(96),
+      }),
+      /required to use it as the operator/,
+    );
+  });
+
+  it("rejects an out-of-range Core v2 participant cap before RPC", async () => {
+    const client = new SubRosaClient({ ...BASE_CONFIG, publicKey: PUBLIC_KEY });
+
+    await assert.rejects(
+      client.createRoundV2({
+        itemRef: new Uint8Array(32),
+        schemaRef: new Uint8Array(32),
+        mode: "Auction",
+        revealRound: 1,
+        commitDeadline: 2,
+        revealDeadline: 3,
+        auditorPubkey: new Uint8Array(96),
+        maxParticipants: 26,
+      }),
+      /maxParticipants must be an integer between 1 and 25/,
+    );
+  });
+
+  it("requires complete custody config for Auction rounds", async () => {
+    const client = new SubRosaClient({ ...BASE_CONFIG, publicKey: PUBLIC_KEY });
+
+    await assert.rejects(
+      client.createRoundV2({
+        itemRef: new Uint8Array(32),
+        schemaRef: new Uint8Array(32),
+        mode: "Auction",
+        revealRound: 1,
+        commitDeadline: 2,
+        revealDeadline: 3,
+        auditorPubkey: new Uint8Array(96),
+      }),
+      /require paymentAsset, lotAsset, and a positive lotAmount/,
+    );
+  });
+
+  it("rejects settlement config for ReceiptOnly rounds", async () => {
+    const client = new SubRosaClient({ ...BASE_CONFIG, publicKey: PUBLIC_KEY });
+
+    await assert.rejects(
+      client.createRoundV2({
+        itemRef: new Uint8Array(32),
+        schemaRef: new Uint8Array(32),
+        mode: "ReceiptOnly",
+        paymentAsset: PUBLIC_KEY,
+        revealRound: 1,
+        commitDeadline: 2,
+        revealDeadline: 3,
+        auditorPubkey: new Uint8Array(96),
+      }),
+      /cannot configure payment or lot settlement/,
+    );
+  });
 });
 
 describe("SubRosaClient external submitter failures", () => {

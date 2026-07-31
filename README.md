@@ -71,8 +71,11 @@ npm install @sub-rosa/sdk
 ```
 
 ```ts
-import { SubRosaClient } from "@sub-rosa/sdk";
-import { sealBid, quicknet } from "@sub-rosa/tlock";
+import {
+  createAssetAuctionRound,
+  sealAssetBid,
+  SubRosaClient,
+} from "@sub-rosa/sdk";
 
 const client = new SubRosaClient({
   rpcUrl,
@@ -81,16 +84,19 @@ const client = new SubRosaClient({
   secretKey,
 });
 
-const sealed = await sealBid({
-  value,
-  nonce,
-  round: revealRound,
-  client: quicknet(),
-  identity,
-  auditorPublicKey,
+const roundId = await createAssetAuctionRound(client, {
+  itemRef,
+  paymentAsset: usdcSac,
+  lotAsset: collectibleSac,
+  lotAmount: 1n,
+  revealRound,
+  commitDeadline,
+  revealDeadline,
+  auditorPubkey,
 });
 
-await client.commit({ roundId, sealed, escrow });
+const sealed = await sealAssetBid({ round: revealRound, drand, amount: bid });
+await client.submitV2({ roundId, sealed, escrow: escrowCap });
 ```
 
 The first app layer should be an auction or competitive bid UI. Other workflows
@@ -122,6 +128,10 @@ pnpm mainnet:micro           # dry-run checklist; --execute needs MAINNET_CONFIR
 
 | Field | Value |
 | --- | --- |
+| Core v2 partner pilot | [`CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P`](https://stellar.expert/explorer/testnet/contract/CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P) |
+| Core v2 WASM hash | `c6eb47b06b95f612361596944ce39f0545d3b11d93678952cef67dec09cce91e` |
+| Core v2 proposal proof | Round `4` · `ReceiptOnly` · **Settled** · canonical envelope persisted |
+| Core v2 atomic auction proof | Round `5` · `20 SRUSD → seller` + `1 SRLOT → winner` · **Settled** |
 | Contract (UI / agents:e2e) | [`CAPTODBCDEVIK23ALBJBS2TXRTIK47ZA5MBTHYF4XLHG2BK7JPYUCU2Y`](https://stellar.expert/explorer/testnet/contract/CAPTODBCDEVIK23ALBJBS2TXRTIK47ZA5MBTHYF4XLHG2BK7JPYUCU2Y) |
 | Drand R | 29,176,840 |
 | Canonical trace | `apps/web/src/demo/demo-trace.generated.ts` (from `pnpm agents:e2e`) |

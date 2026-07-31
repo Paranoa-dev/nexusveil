@@ -235,6 +235,13 @@ describe("SubRosaClient preflight helpers", () => {
       "preflightClear",
       "preflightSettle",
       "preflightVoid",
+      "preflightCreateRoundV2",
+      "preflightCommitV2",
+      "preflightOpenRevealV2",
+      "preflightRevealV2",
+      "preflightClearV2",
+      "preflightSettleV2",
+      "preflightVoidV2",
     ] as const;
 
     const client = new SubRosaClient({

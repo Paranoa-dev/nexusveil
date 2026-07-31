@@ -8,7 +8,9 @@ use soroban_sdk::testutils::storage::Temporary as TemporaryStorageTest;
 
 use crate::drand;
 use crate::storage::{seal_ttl_for_reveal_deadline, TEMP_THRESHOLD};
-use crate::types::{ClearingRule, DataKey, Error, GlobalConfig, Status};
+use crate::types::{
+    ClearingRule, DataKey, Error, GlobalConfig, RoundMode, SettlementConfig, Status,
+};
 use crate::{SubRosaRound, SubRosaRoundClient};
 
 // ── Dummy fixture (no BLS) — only for tests that never call open_reveal ──────
@@ -143,6 +145,47 @@ fn drand_round(f: &Fixture, operator: &Address, commit_deadline: u64, reveal_dea
     )
 }
 
+fn drand_round_v2(
+    f: &Fixture,
+    operator: &Address,
+    commit_deadline: u64,
+    reveal_deadline: u64,
+    mode: RoundMode,
+    max_participants: u32,
+) -> u64 {
+    let (payment_asset, lot_asset, lot_amount) = match mode {
+        RoundMode::Auction => {
+            let lot_issuer = Address::generate(&f.env);
+            let lot_sac = f.env.register_stellar_asset_contract_v2(lot_issuer);
+            let lot = lot_sac.address();
+            token::StellarAssetClient::new(&f.env, &lot).mint(operator, &1);
+            (
+                Some(f.usdc_token.address.clone()),
+                Some(lot),
+                1,
+            )
+        }
+        RoundMode::ReceiptOnly => (None, None, 0),
+    };
+    f.client.create_round_v2(
+        operator,
+        &b32(&f.env, 0xAB),
+        &b32(&f.env, 0xCD),
+        &SettlementConfig {
+            mode,
+            payment_asset,
+            lot_asset,
+            lot_amount,
+        },
+        &VEC_ROUND,
+        &ClearingRule::HighestBid,
+        &commit_deadline,
+        &reveal_deadline,
+        &Bytes::from_array(&f.env, b"auditor"),
+        &max_participants,
+    )
+}
+
 fn real_sig(env: &Env) -> BytesN<96> {
     hexn::<96>(env, VEC_SIG_G1)
 }
@@ -176,6 +219,45 @@ fn commitment(env: &Env, value: i128, nonce: &BytesN<32>) -> BytesN<32> {
     pre.extend_from_array(&value.to_be_bytes());
     pre.extend_from_array(&nonce.to_array());
     env.crypto().sha256(&pre).to_bytes()
+}
+
+fn payload_envelope(
+    env: &Env,
+    amount: Option<i128>,
+    application: &[u8],
+    nonce_byte: u8,
+) -> Bytes {
+    assert!(application.len() <= 196);
+    let total = 60 + application.len();
+    let mut out = [0u8; 256];
+    out[0..4].copy_from_slice(&[0x53, 0x52, 0x50, 0x00]);
+    out[4] = 1;
+    if let Some(value) = amount {
+        out[5] = 1;
+        out[8..24].copy_from_slice(&value.to_be_bytes());
+    }
+    out[24..56].fill(nonce_byte);
+    out[56..60].copy_from_slice(&(application.len() as u32).to_be_bytes());
+    out[60..total].copy_from_slice(application);
+    Bytes::from_slice(env, &out[..total])
+}
+
+fn commit_payload_v2(
+    f: &Fixture,
+    round_id: u64,
+    bidder: &Address,
+    envelope: &Bytes,
+    escrow: i128,
+) {
+    let commitment = f.env.crypto().sha256(envelope).to_bytes();
+    f.client.commit_v2(
+        &round_id,
+        bidder,
+        &commitment,
+        &Bytes::from_array(&f.env, b"sealed-v2"),
+        &escrow,
+        &Bytes::from_array(&f.env, b"id-v2"),
+    );
 }
 
 fn commit_bid(f: &Fixture, round_id: u64, bidder: &Address, value: i128, escrow: i128, nonce_byte: u8) -> BytesN<32> {
@@ -1350,6 +1432,291 @@ fn observer_reads_round_and_bid_state_after_lifecycle_completion() {
     assert!(state.settled);
 }
 
+// ── Core v2 structured payloads ─────────────────────────────────────────────
+
+#[test]
+fn v2_auction_binds_full_payload_and_conserves_funds() {
+    let (f, t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+    let id = drand_round_v2(
+        &f,
+        &operator,
+        commit_deadline,
+        reveal_deadline,
+        RoundMode::Auction,
+        10,
+    );
+    let lot_asset = f.client.get_round_v2(&id).lot_asset.unwrap();
+    let lot_token = token::Client::new(&f.env, &lot_asset);
+    assert_eq!(lot_token.balance(&operator), 0);
+    assert_eq!(lot_token.balance(&f.client.address), 1);
+    let alice = funded_bidder(&f, 1_000);
+    let bob = funded_bidder(&f, 1_000);
+    let alice_envelope = payload_envelope(
+        &f.env,
+        Some(700),
+        br#"{"timelineDays":14,"approach":"formal"}"#,
+        0x11,
+    );
+    let bob_envelope = payload_envelope(
+        &f.env,
+        Some(500),
+        br#"{"timelineDays":21,"approach":"manual"}"#,
+        0x22,
+    );
+    commit_payload_v2(&f, id, &alice, &alice_envelope, 1_000);
+    commit_payload_v2(&f, id, &bob, &bob_envelope, 1_000);
+    assert_eq!(f.usdc_token.balance(&f.client.address), 2_000);
+
+    f.env.ledger().with_mut(|ledger| ledger.timestamp = t_reveal + 1);
+    f.client.open_reveal_v2(&id, &real_sig(&f.env));
+
+    // The amount is unchanged, but one application byte differs. The full
+    // envelope commitment must reject it before any reveal state is recorded.
+    let tampered = payload_envelope(
+        &f.env,
+        Some(700),
+        br#"{"timelineDays":14,"approach":"manual"}"#,
+        0x11,
+    );
+    assert_try_contract_err(
+        f.client.try_reveal_v2(&id, &alice, &tampered),
+        Error::HashMismatch,
+    );
+
+    f.client.reveal_v2(&id, &alice, &alice_envelope);
+    f.client.reveal_v2(&id, &bob, &bob_envelope);
+    let alice_state = f.client.get_submission_v2(&id, &alice);
+    assert_eq!(alice_state.revealed_envelope, Some(alice_envelope));
+    assert_eq!(alice_state.revealed_amount, Some(700));
+    assert!(alice_state.valid);
+
+    f.env
+        .ledger()
+        .with_mut(|ledger| ledger.timestamp = reveal_deadline + 1);
+    assert_eq!(f.client.clear_v2(&id), Some(alice.clone()));
+    f.client.settle_v2(&id);
+
+    let round = f.client.get_round_v2(&id);
+    assert_eq!(round.protocol_version, 2);
+    assert_eq!(round.schema_ref, b32(&f.env, 0xCD));
+    assert_eq!(round.mode, RoundMode::Auction);
+    assert_eq!(round.payment_asset, Some(f.usdc_token.address.clone()));
+    assert_eq!(round.lot_asset, Some(lot_asset.clone()));
+    assert_eq!(round.lot_amount, 1);
+    assert_eq!(round.status, Status::Settled);
+    assert_eq!(round.winner, Some(alice.clone()));
+    assert_eq!(round.winning_bid, 700);
+    assert_eq!(f.usdc_token.balance(&operator), 700);
+    assert_eq!(f.usdc_token.balance(&alice), 300);
+    assert_eq!(f.usdc_token.balance(&bob), 1_000);
+    assert_eq!(f.usdc_token.balance(&f.client.address), 0);
+    assert_eq!(lot_token.balance(&alice), 1);
+    assert_eq!(lot_token.balance(&operator), 0);
+    assert_eq!(lot_token.balance(&f.client.address), 0);
+}
+
+#[test]
+fn v2_receipt_only_finalizes_without_token_movement() {
+    let (f, t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+    let id = drand_round_v2(
+        &f,
+        &operator,
+        commit_deadline,
+        reveal_deadline,
+        RoundMode::ReceiptOnly,
+        10,
+    );
+    let participant = Address::generate(&f.env);
+    let envelope = payload_envelope(
+        &f.env,
+        None,
+        br#"{"price":"private","timelineDays":14,"approach":"formal"}"#,
+        0x33,
+    );
+    commit_payload_v2(&f, id, &participant, &envelope, 0);
+    assert_eq!(f.usdc_token.balance(&f.client.address), 0);
+
+    f.env.ledger().with_mut(|ledger| ledger.timestamp = t_reveal + 1);
+    f.client.open_reveal_v2(&id, &real_sig(&f.env));
+    f.client.reveal_v2(&id, &participant, &envelope);
+    f.env
+        .ledger()
+        .with_mut(|ledger| ledger.timestamp = reveal_deadline + 1);
+    assert_eq!(f.client.clear_v2(&id), None);
+
+    let round = f.client.get_round_v2(&id);
+    let state = f.client.get_submission_v2(&id, &participant);
+    assert_eq!(round.mode, RoundMode::ReceiptOnly);
+    assert_eq!(round.payment_asset, None);
+    assert_eq!(round.lot_asset, None);
+    assert_eq!(round.lot_amount, 0);
+    assert_eq!(round.status, Status::Settled);
+    assert_eq!(round.winner, None);
+    assert_eq!(state.revealed_amount, None);
+    assert_eq!(state.revealed_envelope, Some(envelope));
+    assert!(state.valid);
+    assert!(state.settled);
+    assert_eq!(f.usdc_token.balance(&f.client.address), 0);
+}
+
+#[test]
+fn v2_round_enforces_configured_and_protocol_cohort_caps() {
+    let (f, _t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+    let id = drand_round_v2(
+        &f,
+        &operator,
+        commit_deadline,
+        reveal_deadline,
+        RoundMode::ReceiptOnly,
+        1,
+    );
+    let first = Address::generate(&f.env);
+    let second = Address::generate(&f.env);
+    let envelope = payload_envelope(&f.env, None, b"proposal", 0x44);
+    commit_payload_v2(&f, id, &first, &envelope, 0);
+    let commitment = f.env.crypto().sha256(&envelope).to_bytes();
+    assert_try_contract_err(
+        f.client.try_commit_v2(
+            &id,
+            &second,
+            &commitment,
+            &Bytes::from_array(&f.env, b"sealed-v2"),
+            &0,
+            &Bytes::from_array(&f.env, b"id-v2"),
+        ),
+        Error::RoundFull,
+    );
+
+    assert_try_create_round_err(
+        f.client.try_create_round_v2(
+            &operator,
+            &b32(&f.env, 1),
+            &b32(&f.env, 2),
+            &SettlementConfig {
+                mode: RoundMode::Auction,
+                payment_asset: Some(f.usdc_token.address.clone()),
+                lot_asset: Some(f.usdc_token.address.clone()),
+                lot_amount: 1,
+            },
+            &VEC_ROUND,
+            &ClearingRule::HighestBid,
+            &commit_deadline,
+            &reveal_deadline,
+            &Bytes::from_array(&f.env, b"auditor"),
+            &26,
+        ),
+        Error::InvalidLimit,
+    );
+}
+
+#[test]
+fn v2_rejects_incomplete_or_disallowed_settlement_config() {
+    let (f, _t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+
+    assert_try_create_round_err(
+        f.client.try_create_round_v2(
+            &operator,
+            &b32(&f.env, 1),
+            &b32(&f.env, 2),
+            &SettlementConfig {
+                mode: RoundMode::Auction,
+                payment_asset: Some(f.usdc_token.address.clone()),
+                lot_asset: None,
+                lot_amount: 1,
+            },
+            &VEC_ROUND,
+            &ClearingRule::HighestBid,
+            &commit_deadline,
+            &reveal_deadline,
+            &Bytes::new(&f.env),
+            &1,
+        ),
+        Error::InvalidAmount,
+    );
+
+    assert_try_create_round_err(
+        f.client.try_create_round_v2(
+            &operator,
+            &b32(&f.env, 1),
+            &b32(&f.env, 2),
+            &SettlementConfig {
+                mode: RoundMode::ReceiptOnly,
+                payment_asset: Some(f.usdc_token.address.clone()),
+                lot_asset: None,
+                lot_amount: 0,
+            },
+            &VEC_ROUND,
+            &ClearingRule::HighestBid,
+            &commit_deadline,
+            &reveal_deadline,
+            &Bytes::new(&f.env),
+            &1,
+        ),
+        Error::EscrowNotAllowed,
+    );
+}
+
+#[test]
+fn v2_no_bid_clear_returns_custodied_lot_to_seller() {
+    let (f, t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+    let id = drand_round_v2(
+        &f,
+        &operator,
+        commit_deadline,
+        reveal_deadline,
+        RoundMode::Auction,
+        10,
+    );
+    let lot_asset = f.client.get_round_v2(&id).lot_asset.unwrap();
+    let lot_token = token::Client::new(&f.env, &lot_asset);
+    assert_eq!(lot_token.balance(&f.client.address), 1);
+
+    f.env.ledger().with_mut(|ledger| ledger.timestamp = t_reveal + 1);
+    f.client.open_reveal_v2(&id, &real_sig(&f.env));
+    f.env
+        .ledger()
+        .with_mut(|ledger| ledger.timestamp = reveal_deadline + 1);
+    assert_eq!(f.client.clear_v2(&id), None);
+
+    assert_eq!(f.client.get_round_v2(&id).status, Status::Voided);
+    assert_eq!(lot_token.balance(&operator), 1);
+    assert_eq!(lot_token.balance(&f.client.address), 0);
+}
+
+#[test]
+fn v2_stale_void_refunds_escrow_and_returns_lot() {
+    let (f, _t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+    let id = drand_round_v2(
+        &f,
+        &operator,
+        commit_deadline,
+        reveal_deadline,
+        RoundMode::Auction,
+        10,
+    );
+    let lot_asset = f.client.get_round_v2(&id).lot_asset.unwrap();
+    let lot_token = token::Client::new(&f.env, &lot_asset);
+    let bidder = funded_bidder(&f, 1_000);
+    let envelope = payload_envelope(&f.env, Some(700), b"bid", 0x55);
+    commit_payload_v2(&f, id, &bidder, &envelope, 1_000);
+
+    f.env
+        .ledger()
+        .with_mut(|ledger| ledger.timestamp = reveal_deadline + 3_601);
+    f.client.void_v2(&id);
+
+    assert_eq!(f.usdc_token.balance(&bidder), 1_000);
+    assert_eq!(f.usdc_token.balance(&f.client.address), 0);
+    assert_eq!(lot_token.balance(&operator), 1);
+    assert_eq!(lot_token.balance(&f.client.address), 0);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ISSUE #160 — ERROR CODE DOCUMENTATION CONSISTENCY
 //
@@ -1390,7 +1757,7 @@ pub(super) const DOCUMENTED_ERROR_CODES: &[(Error, u32)] = &[
     (Error::RoundVoided, 20),
     (Error::NotVoidable, 21),
     (Error::WrongStatus, 22),
-    // ── 30–39: cryptography & validation ──
+    // ── 30–43: cryptography & validation ──
     (Error::InvalidDrandSignature, 30),
     (Error::HashMismatch, 31),
     (Error::AlreadyRevealed, 32),
@@ -1401,6 +1768,10 @@ pub(super) const DOCUMENTED_ERROR_CODES: &[(Error, u32)] = &[
     (Error::NoValidBids, 37),
     (Error::RoundFull, 38),
     (Error::InvalidLimit, 39),
+    (Error::UnsupportedVersion, 40),
+    (Error::MalformedPayload, 41),
+    (Error::EscrowNotAllowed, 42),
+    (Error::RoundDurationTooLong, 43),
 ];
 
 /// Convert an `Error` to its on-chain discriminant using the [`repr(u32)`]
@@ -1439,6 +1810,10 @@ pub(super) fn variant_name(e: Error) -> &'static str {
         Error::NoValidBids => "NoValidBids",
         Error::RoundFull => "RoundFull",
         Error::InvalidLimit => "InvalidLimit",
+        Error::UnsupportedVersion => "UnsupportedVersion",
+        Error::MalformedPayload => "MalformedPayload",
+        Error::EscrowNotAllowed => "EscrowNotAllowed",
+        Error::RoundDurationTooLong => "RoundDurationTooLong",
     }
 }
 
@@ -1486,7 +1861,7 @@ fn error_table_enumerates_every_variant() {
     // DOCUMENTED_ERROR_CODES.
     assert_eq!(
         DOCUMENTED_ERROR_CODES.len(),
-        27,
+        31,
         "DOCUMENTED_ERROR_CODES appears missing entries. The exhaustive \
          `variant_name` match already enforces parity at compile time — \
          update it together with this list and contracts/round/ERRORS.md."
@@ -1498,12 +1873,12 @@ fn error_codes_use_reserved_ranges() {
     // Range policy enforced by the documentation:
     //   1–4     → initialization/lookup
     //   10–22   → lifecycle/timing
-    //   30–39   → crypto/validation
+    //   30–43   → crypto/validation
     // New categories should pick a fresh, contiguous range — not collide with
     // logging conventions — and update ERRORS.md at the same time.
     for (variant, code) in DOCUMENTED_ERROR_CODES {
         let name = variant_name(*variant);
-        let in_range = matches!(*code, 1..=4 | 10..=22 | 30..=39);
+        let in_range = matches!(*code, 1..=4 | 10..=22 | 30..=43);
         assert!(
             in_range,
             "{name} = {code} falls outside the documented code ranges; \

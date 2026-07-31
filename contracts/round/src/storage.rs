@@ -1,6 +1,8 @@
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::types::{BidState, DataKey, Error, GlobalConfig, Round, Seal};
+use crate::types::{
+    BidState, DataKey, Error, GlobalConfig, Round, RoundV2, Seal, SubmissionStateV2,
+};
 
 // TTL policy. Ledger close time on Stellar is ~5s, so these are generous for a
 // hackathon-scale round while keeping ephemeral seal data short-lived.
@@ -82,6 +84,27 @@ pub fn set_round(env: &Env, round_id: u64, round: &Round) {
         .extend_ttl(&key, PERSISTENT_THRESHOLD, PERSISTENT_BUMP);
 }
 
+pub fn get_round_v2(env: &Env, round_id: u64) -> Result<RoundV2, Error> {
+    let key = DataKey::RoundV2(round_id);
+    let round: RoundV2 = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(Error::RoundNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_THRESHOLD, PERSISTENT_BUMP);
+    Ok(round)
+}
+
+pub fn set_round_v2(env: &Env, round_id: u64, round: &RoundV2) {
+    let key = DataKey::RoundV2(round_id);
+    env.storage().persistent().set(&key, round);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_THRESHOLD, PERSISTENT_BUMP);
+}
+
 pub fn get_state(env: &Env, round_id: u64, bidder: &Address) -> Result<BidState, Error> {
     let key = DataKey::State(round_id, bidder.clone());
     let state: BidState = env
@@ -109,6 +132,46 @@ pub fn set_state(env: &Env, round_id: u64, bidder: &Address, state: &BidState) {
         .extend_ttl(&key, PERSISTENT_THRESHOLD, PERSISTENT_BUMP);
 }
 
+pub fn get_submission_v2(
+    env: &Env,
+    round_id: u64,
+    bidder: &Address,
+) -> Result<SubmissionStateV2, Error> {
+    let key = DataKey::SubmissionV2(round_id, bidder.clone());
+    let state: SubmissionStateV2 = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(Error::BidNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_THRESHOLD, PERSISTENT_BUMP);
+    Ok(state)
+}
+
+pub fn try_get_submission_v2(
+    env: &Env,
+    round_id: u64,
+    bidder: &Address,
+) -> Option<SubmissionStateV2> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SubmissionV2(round_id, bidder.clone()))
+}
+
+pub fn set_submission_v2(
+    env: &Env,
+    round_id: u64,
+    bidder: &Address,
+    state: &SubmissionStateV2,
+) {
+    let key = DataKey::SubmissionV2(round_id, bidder.clone());
+    env.storage().persistent().set(&key, state);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_THRESHOLD, PERSISTENT_BUMP);
+}
+
 pub fn set_seal(env: &Env, round_id: u64, bidder: &Address, seal: &Seal, reveal_deadline: u64) {
     let key = DataKey::Seal(round_id, bidder.clone());
     env.storage().temporary().set(&key, seal);
@@ -120,6 +183,44 @@ pub fn get_seal(env: &Env, round_id: u64, bidder: &Address, reveal_deadline: u64
     let seal = env.storage().temporary().get(&key)?;
     extend_seal_ttl(env, &key, reveal_deadline);
     Some(seal)
+}
+
+pub fn set_seal_v2(
+    env: &Env,
+    round_id: u64,
+    bidder: &Address,
+    seal: &Seal,
+    reveal_deadline: u64,
+) {
+    let key = DataKey::SealV2(round_id, bidder.clone());
+    env.storage().temporary().set(&key, seal);
+    extend_seal_ttl(env, &key, reveal_deadline);
+}
+
+pub fn get_seal_v2(
+    env: &Env,
+    round_id: u64,
+    bidder: &Address,
+    reveal_deadline: u64,
+) -> Option<Seal> {
+    let key = DataKey::SealV2(round_id, bidder.clone());
+    let seal = env.storage().temporary().get(&key)?;
+    extend_seal_ttl(env, &key, reveal_deadline);
+    Some(seal)
+}
+
+pub fn extend_round_seals_v2(
+    env: &Env,
+    round_id: u64,
+    bidders: &Vec<Address>,
+    reveal_deadline: u64,
+) {
+    for bidder in bidders.iter() {
+        let key = DataKey::SealV2(round_id, bidder.clone());
+        if env.storage().temporary().has(&key) {
+            extend_seal_ttl(env, &key, reveal_deadline);
+        }
+    }
 }
 
 /// Re-extend every committed seal through the reveal window when reveal opens.

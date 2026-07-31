@@ -11,7 +11,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { StrKey, scValToNative } from "@stellar/stellar-sdk";
-import { commitment, type SealedBid } from "@sub-rosa/tlock";
+import {
+  commitment,
+  encodePayloadEnvelope,
+  type SealedBid,
+} from "@sub-rosa/tlock";
 import { SubRosaClient } from "./index.js";
 
 const TESTNET = "Test SDF Network ; September 2015";
@@ -209,4 +213,50 @@ test("ClearingRule selects the correct variant for both tags", () => {
     });
     assert.deepEqual(scValToNative(args[3]), [tag]);
   }
+});
+
+test("create_round_v2 encodes schema, mode, and participant cap", () => {
+  const c = newClient();
+  const args = c.spec.funcArgsToScVals("create_round_v2", {
+    operator: addr(2),
+    item_ref: Buffer.from(u8(32, 3)),
+    schema_ref: Buffer.from(u8(32, 4)),
+    settlement: {
+      mode: { tag: "Auction", values: undefined },
+      payment_asset: addr(5),
+      lot_asset: addr(6),
+      lot_amount: 1n,
+    },
+    reveal_round: 19_283_746n,
+    clearing_rule: { tag: "HighestBid", values: undefined },
+    commit_deadline: 1_000n,
+    reveal_deadline: 2_000n,
+    auditor_pubkey: Buffer.from(u8(96, 5)),
+    max_participants: 25,
+  });
+
+  assert.equal(args.length, 10);
+  assert.deepEqual(new Uint8Array(scValToNative(args[2])), u8(32, 4));
+  assert.deepEqual(scValToNative(args[3]).mode, ["Auction"]);
+  assert.equal(scValToNative(args[3]).lot_amount, 1n);
+  assert.equal(scValToNative(args[9]), 25);
+});
+
+test("reveal_v2 carries the complete canonical payload envelope", () => {
+  const c = newClient();
+  const envelope = encodePayloadEnvelope({
+    amount: 700n,
+    nonce: u8(32, 8),
+    payload: new TextEncoder().encode(
+      JSON.stringify({ timelineDays: 14, approach: "manual review" }),
+    ),
+  });
+  const args = c.spec.funcArgsToScVals("reveal_v2", {
+    round_id: 3n,
+    bidder: addr(1),
+    envelope: Buffer.from(envelope),
+  });
+
+  assert.equal(args.length, 3);
+  assert.deepEqual(new Uint8Array(scValToNative(args[2])), envelope);
 });

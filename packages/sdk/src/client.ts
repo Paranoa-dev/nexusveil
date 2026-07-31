@@ -18,10 +18,18 @@ import {
   type ClearingRule,
   type GlobalConfig,
   type Round,
+  type RoundMode,
+  type RoundV2,
   type Seal,
+  type SettlementConfig,
+  type SubmissionStateV2,
 } from "@sub-rosa/round-bindings";
-import { toHex } from "@sub-rosa/tlock";
-import type { SealedBid } from "@sub-rosa/tlock";
+import { encodePayloadEnvelope, toHex } from "@sub-rosa/tlock";
+import type {
+  PayloadEnvelope,
+  SealedBid,
+  SealedPayload,
+} from "@sub-rosa/tlock";
 import type { RoundReceipt } from "./receipt.js";
 import { validateEncryptedBlob } from "./encrypted-blob.js";
 import { networkFingerprint } from "./receipt.js";
@@ -86,6 +94,9 @@ export interface SubRosaClientConfig {
 }
 
 export type ClearingRuleTag = ClearingRule["tag"];
+export type RoundModeTag = RoundMode["tag"];
+
+export const MAX_V2_PARTICIPANTS = 25;
 
 export interface CreateRoundParams {
   /** sha256 (or any opaque 32-byte ref) of the off-chain item description. */
@@ -124,10 +135,101 @@ export interface RevealParams {
   nonce: Uint8Array;
 }
 
+export interface CreateRoundV2Params {
+  /** Opaque 32-byte reference to the auction lot or proposal request. */
+  itemRef: Uint8Array;
+  /** Opaque 32-byte reference to the application payload schema. */
+  schemaRef: Uint8Array;
+  /** Auction locks escrow; ReceiptOnly proves simultaneous reveal without funds. */
+  mode: RoundModeTag;
+  /** SAC used for escrow and seller payment in Auction mode. */
+  paymentAsset?: string;
+  /** SAC lot held in custody and transferred to the winner in Auction mode. */
+  lotAsset?: string;
+  /** Lot units held in custody. Required and positive in Auction mode. */
+  lotAmount?: bigint;
+  revealRound: number | bigint;
+  commitDeadline: number | bigint;
+  revealDeadline: number | bigint;
+  auditorPubkey: Uint8Array;
+  /** Protocol-enforced participant cap. Default and maximum: 25. */
+  maxParticipants?: number;
+  clearingRule?: ClearingRuleTag;
+  operator?: string;
+}
+
+export interface CommitV2Params {
+  roundId: number | bigint;
+  /** Structured seal produced by @sub-rosa/tlock `sealPayload`. */
+  sealed: SealedPayload;
+  /** Must be positive for Auction and zero for ReceiptOnly rounds. */
+  escrow: bigint;
+  bidder?: string;
+}
+
+export interface RevealV2Params {
+  roundId: number | bigint;
+  bidder: string;
+  /** The structured plaintext returned by @sub-rosa/tlock `openPayload`. */
+  envelope: PayloadEnvelope;
+}
+
 const toBigInt = (v: number | bigint): bigint =>
   typeof v === "bigint" ? v : BigInt(v);
 
 const toBuffer = (b: Uint8Array): Buffer => Buffer.from(b);
+
+function v2RoundArgs(
+  params: CreateRoundV2Params,
+  operator: string,
+) {
+  const max_participants = params.maxParticipants ?? MAX_V2_PARTICIPANTS;
+  if (!Number.isInteger(max_participants) || max_participants < 1 || max_participants > MAX_V2_PARTICIPANTS) {
+    throw new SubRosaClientConfigError(
+      `maxParticipants must be an integer between 1 and ${MAX_V2_PARTICIPANTS}`,
+    );
+  }
+  const lotAmount = params.lotAmount ?? 0n;
+  if (
+    params.mode === "Auction" &&
+    (!params.paymentAsset || !params.lotAsset || lotAmount <= 0n)
+  ) {
+    throw new SubRosaClientConfigError(
+      "Auction rounds require paymentAsset, lotAsset, and a positive lotAmount",
+    );
+  }
+  if (
+    params.mode === "ReceiptOnly" &&
+    (params.paymentAsset !== undefined ||
+      params.lotAsset !== undefined ||
+      lotAmount !== 0n)
+  ) {
+    throw new SubRosaClientConfigError(
+      "ReceiptOnly rounds cannot configure payment or lot settlement",
+    );
+  }
+  const settlement: SettlementConfig = {
+    mode: { tag: params.mode, values: undefined } as RoundMode,
+    payment_asset: params.paymentAsset,
+    lot_asset: params.lotAsset,
+    lot_amount: lotAmount,
+  };
+  return {
+    operator,
+    item_ref: toBuffer(params.itemRef),
+    schema_ref: toBuffer(params.schemaRef),
+    settlement,
+    reveal_round: toBigInt(params.revealRound),
+    clearing_rule: {
+      tag: params.clearingRule ?? "HighestBid",
+      values: undefined,
+    } as ClearingRule,
+    commit_deadline: toBigInt(params.commitDeadline),
+    reveal_deadline: toBigInt(params.revealDeadline),
+    auditor_pubkey: toBuffer(params.auditorPubkey),
+    max_participants,
+  };
+}
 
 export class SubRosaClient {
   readonly contract: RoundContract;
@@ -308,6 +410,14 @@ export class SubRosaClient {
     return this.#sendUnwrap(tx);
   }
 
+  async createRoundV2(params: CreateRoundV2Params): Promise<bigint> {
+    const operator = params.operator ?? this.#requireSource("operator");
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.create_round_v2(v2RoundArgs(params, operator)),
+    );
+    return this.#sendUnwrap(tx);
+  }
+
   async commit(params: CommitParams): Promise<void> {
     // Validate encrypted blobs before submitting — catches size/encoding
     // issues early, before paying gas for an on-chain revert (PayloadTooLarge).
@@ -344,12 +454,69 @@ export class SubRosaClient {
     await this.#sendUnwrap(tx);
   }
 
+  async commitV2(params: CommitV2Params): Promise<void> {
+    if (params.sealed.version !== 1) {
+      throw new SubRosaClientConfigError(
+        `unsupported sealed payload version ${params.sealed.version}`,
+      );
+    }
+    const ciphertextResult = validateEncryptedBlob(
+      params.sealed.ciphertext,
+      "ciphertext",
+    );
+    if (!ciphertextResult.valid) {
+      throw new SubRosaClientConfigError(
+        ciphertextResult.issues.map((issue) => issue.message).join("; "),
+      );
+    }
+    const auditorBlobResult = validateEncryptedBlob(
+      params.sealed.auditorBlob,
+      "auditor_blob",
+    );
+    if (!auditorBlobResult.valid) {
+      throw new SubRosaClientConfigError(
+        auditorBlobResult.issues.map((issue) => issue.message).join("; "),
+      );
+    }
+
+    const bidder = params.bidder ?? this.#requireSource("bidder");
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.commit_v2({
+        round_id: normalizeRoundId(params.roundId),
+        bidder,
+        commitment: toBuffer(params.sealed.commitment),
+        ciphertext: toBuffer(params.sealed.ciphertext),
+        escrow: params.escrow,
+        auditor_blob: toBuffer(params.sealed.auditorBlob),
+      }),
+    );
+    await this.#sendUnwrap(tx);
+  }
+
+  /** Partner-facing alias: submit a structured sealed payload to Core v2. */
+  submitV2(params: CommitV2Params): Promise<void> {
+    return this.commitV2(params);
+  }
+
   async openReveal(
     roundId: number | bigint,
     drandSignature: Uint8Array,
   ): Promise<void> {
     const tx = await this.#validatedContractCall(() =>
       this.contract.open_reveal({
+        round_id: normalizeRoundId(roundId),
+        drand_signature: toBuffer(drandSignature),
+      }),
+    );
+    await this.#sendUnwrap(tx);
+  }
+
+  async openRevealV2(
+    roundId: number | bigint,
+    drandSignature: Uint8Array,
+  ): Promise<void> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.open_reveal_v2({
         round_id: normalizeRoundId(roundId),
         drand_signature: toBuffer(drandSignature),
       }),
@@ -369,11 +536,30 @@ export class SubRosaClient {
     await this.#sendUnwrap(tx);
   }
 
+  async revealV2(params: RevealV2Params): Promise<void> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.reveal_v2({
+        round_id: normalizeRoundId(params.roundId),
+        bidder: params.bidder,
+        envelope: toBuffer(encodePayloadEnvelope(params.envelope)),
+      }),
+    );
+    await this.#sendUnwrap(tx);
+  }
+
   /** Clear a round. Returns the winning address, or undefined if the round was
    *  voided for having no valid bids. */
   async clear(roundId: number | bigint): Promise<string | undefined> {
     const tx = await this.#validatedContractCall(() =>
       this.contract.clear({ round_id: normalizeRoundId(roundId) }),
+    );
+    const winner = await this.#sendUnwrap(tx);
+    return winner ?? undefined;
+  }
+
+  async clearV2(roundId: number | bigint): Promise<string | undefined> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.clear_v2({ round_id: normalizeRoundId(roundId) }),
     );
     const winner = await this.#sendUnwrap(tx);
     return winner ?? undefined;
@@ -386,9 +572,23 @@ export class SubRosaClient {
     await this.#sendUnwrap(tx);
   }
 
+  async settleV2(roundId: number | bigint): Promise<void> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.settle_v2({ round_id: normalizeRoundId(roundId) }),
+    );
+    await this.#sendUnwrap(tx);
+  }
+
   async void(roundId: number | bigint): Promise<void> {
     const tx = await this.#validatedContractCall(() =>
       this.contract.void({ round_id: normalizeRoundId(roundId) }),
+    );
+    await this.#sendUnwrap(tx);
+  }
+
+  async voidV2(roundId: number | bigint): Promise<void> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.void_v2({ round_id: normalizeRoundId(roundId) }),
     );
     await this.#sendUnwrap(tx);
   }
@@ -521,11 +721,110 @@ export class SubRosaClient {
     );
   }
 
+  /** Simulate `createRoundV2` without signing or submitting. */
+  preflightCreateRoundV2(
+    params: CreateRoundV2Params,
+  ): Promise<PreflightResult<bigint>> {
+    return this.#preflight("create_round_v2", () => {
+      const operator = params.operator ?? this.#requireSource("operator");
+      return this.#validatedContractCall(() =>
+        this.contract.create_round_v2(v2RoundArgs(params, operator)),
+      );
+    });
+  }
+
+  /** Simulate `commitV2` without signing or submitting. */
+  preflightCommitV2(params: CommitV2Params): Promise<PreflightResult<void>> {
+    return this.#preflight("commit_v2", () => {
+      if (params.sealed.version !== 1) {
+        throw new SubRosaClientConfigError(
+          `unsupported sealed payload version ${params.sealed.version}`,
+        );
+      }
+      const bidder = params.bidder ?? this.#requireSource("bidder");
+      return this.#validatedContractCall(() =>
+        this.contract.commit_v2({
+          round_id: normalizeRoundId(params.roundId),
+          bidder,
+          commitment: toBuffer(params.sealed.commitment),
+          ciphertext: toBuffer(params.sealed.ciphertext),
+          escrow: params.escrow,
+          auditor_blob: toBuffer(params.sealed.auditorBlob),
+        }),
+      );
+    });
+  }
+
+  preflightOpenRevealV2(
+    roundId: number | bigint,
+    drandSignature: Uint8Array,
+  ): Promise<PreflightResult<void>> {
+    return this.#preflight("open_reveal_v2", () =>
+      this.#validatedContractCall(() =>
+        this.contract.open_reveal_v2({
+          round_id: normalizeRoundId(roundId),
+          drand_signature: toBuffer(drandSignature),
+        }),
+      ),
+    );
+  }
+
+  preflightRevealV2(params: RevealV2Params): Promise<PreflightResult<void>> {
+    return this.#preflight("reveal_v2", () =>
+      this.#validatedContractCall(() =>
+        this.contract.reveal_v2({
+          round_id: normalizeRoundId(params.roundId),
+          bidder: params.bidder,
+          envelope: toBuffer(encodePayloadEnvelope(params.envelope)),
+        }),
+      ),
+    );
+  }
+
+  async preflightClearV2(
+    roundId: number | bigint,
+  ): Promise<PreflightResult<string | undefined>> {
+    const result = await this.#preflight<string | null | undefined>(
+      "clear_v2",
+      () =>
+        this.#validatedContractCall(() =>
+          this.contract.clear_v2({ round_id: normalizeRoundId(roundId) }),
+        ),
+    );
+    if (!result.ok) return result;
+    return { ...result, result: result.result ?? undefined };
+  }
+
+  preflightSettleV2(
+    roundId: number | bigint,
+  ): Promise<PreflightResult<void>> {
+    return this.#preflight("settle_v2", () =>
+      this.#validatedContractCall(() =>
+        this.contract.settle_v2({ round_id: normalizeRoundId(roundId) }),
+      ),
+    );
+  }
+
+  preflightVoidV2(roundId: number | bigint): Promise<PreflightResult<void>> {
+    return this.#preflight("void_v2", () =>
+      this.#validatedContractCall(() =>
+        this.contract.void_v2({ round_id: normalizeRoundId(roundId) }),
+      ),
+    );
+  }
+
   // ── Read-only views (simulation only; no signing/submission) ───────────
 
   async getRound(roundId: number | bigint): Promise<Round> {
     const tx = await this.#validatedContractCall(() =>
       this.contract.get_round({ round_id: normalizeRoundId(roundId) }),
+    );
+    return tx.result.unwrap();
+  }
+
+  async getRoundV2(roundId: number | bigint): Promise<RoundV2> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.get_round_v2({ round_id: normalizeRoundId(roundId) }),
     );
     return tx.result.unwrap();
   }
@@ -543,11 +842,31 @@ export class SubRosaClient {
     return tx.result.unwrap();
   }
 
+  async getSubmissionV2(
+    roundId: number | bigint,
+    bidder: string,
+  ): Promise<SubmissionStateV2> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.get_submission_v2({
+        round_id: normalizeRoundId(roundId),
+        bidder,
+      }),
+    );
+    return tx.result.unwrap();
+  }
+
   /** The deterministic, ordered bidder index — the keeper's reveal set. Reading
    *  this is how the keeper knows exactly which seals to open and reveal. */
   async getBidders(roundId: number | bigint): Promise<string[]> {
     const tx = await this.#validatedContractCall(() =>
       this.contract.get_bidders({ round_id: normalizeRoundId(roundId) }),
+    );
+    return tx.result.unwrap();
+  }
+
+  async getBiddersV2(roundId: number | bigint): Promise<string[]> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.get_bidders_v2({ round_id: normalizeRoundId(roundId) }),
     );
     return tx.result.unwrap();
   }
@@ -591,6 +910,19 @@ export class SubRosaClient {
   ): Promise<Seal | undefined> {
     const tx = await this.#validatedContractCall(() =>
       this.contract.get_seal({
+        round_id: normalizeRoundId(roundId),
+        bidder,
+      }),
+    );
+    return tx.result ?? undefined;
+  }
+
+  async getSealV2(
+    roundId: number | bigint,
+    bidder: string,
+  ): Promise<Seal | undefined> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.get_seal_v2({
         round_id: normalizeRoundId(roundId),
         bidder,
       }),

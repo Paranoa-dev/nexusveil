@@ -15,7 +15,13 @@
 // no mock — just the SDK over real RPC and the live Drand beacon.
 
 import type { SubRosaClient } from "@sub-rosa/sdk";
-import { openBid, fetchRoundSignature, type DrandClient } from "@sub-rosa/tlock";
+import {
+  openBid,
+  openPayload,
+  fetchRoundSignature,
+  type DrandClient,
+  type PayloadEnvelope,
+} from "@sub-rosa/tlock";
 
 export type KeeperLogger = (msg: string) => void;
 
@@ -28,6 +34,11 @@ export interface KeeperDeps {
   maxWaitSeconds?: number;
   /** Poll cadence while waiting for R (ms). Default 3000. */
   pollMs?: number;
+  /** @internal Structured-payload opener override for deterministic tests. */
+  openStructuredPayload?: (
+    ciphertext: Uint8Array,
+    client: DrandClient,
+  ) => Promise<PayloadEnvelope>;
 }
 
 export interface SkipRecord {
@@ -216,6 +227,124 @@ export async function keepRound(
   return result;
 }
 
+/** Core v2 keeper pass. Opens structured payloads and reveals the complete
+ * canonical envelope, preserving every partner-defined submission byte. */
+export async function keepRoundV2(
+  deps: KeeperDeps,
+  roundId: bigint | number,
+): Promise<KeeperResult> {
+  const { sdk, drand, log = () => {} } = deps;
+  const rid = BigInt(roundId);
+  const result: KeeperResult = {
+    roundId: rid,
+    finalStatus: "",
+    openedReveal: false,
+    revealed: [],
+    skipped: [],
+  };
+
+  let round = await sdk.getRoundV2(rid);
+  log(`round ${rid} v2: status=${round.status.tag} R=${round.reveal_round}`);
+
+  if (round.status.tag === "Open") {
+    const drandRound = Number(round.reveal_round);
+    const available = await waitForRound(deps, drandRound);
+    if (!available) {
+      result.finalStatus = round.status.tag;
+      return result;
+    }
+
+    const pollMs = deps.pollMs ?? 3000;
+    let signature: Uint8Array | undefined;
+    for (let attempt = 0; attempt < 5 && !signature; attempt++) {
+      try {
+        signature = await fetchRoundSignature(drand, drandRound);
+      } catch (error) {
+        log(
+          `Drand round ${drandRound} not servable yet (try ${attempt + 1}/5): ${errorName(error)}`,
+        );
+        await sleep(pollMs);
+      }
+    }
+    if (!signature) {
+      result.finalStatus = round.status.tag;
+      return result;
+    }
+
+    try {
+      await sdk.openRevealV2(rid, signature);
+      result.openedReveal = true;
+      log(`open_reveal_v2 OK (round ${rid} via Drand R=${drandRound})`);
+    } catch (error) {
+      if (!errorMatches(error, IDEMPOTENT_OPEN)) throw error;
+      log(`open_reveal_v2 already done (${errorName(error)}); continuing`);
+    }
+    round = await sdk.getRoundV2(rid);
+  }
+
+  if (round.status.tag === "Revealing") {
+    const bidders = await sdk.getBiddersV2(rid);
+    const opener = deps.openStructuredPayload ?? openPayload;
+    log(`revealing ${bidders.length} v2 submission(s)`);
+
+    for (const bidder of bidders) {
+      let state;
+      try {
+        state = await sdk.getSubmissionV2(rid, bidder);
+      } catch (error) {
+        result.skipped.push({
+          bidder,
+          reason: `state read failed: ${errorName(error)}`,
+        });
+        continue;
+      }
+      if (state.revealed_envelope != null) {
+        result.skipped.push({ bidder, reason: "already revealed" });
+        continue;
+      }
+
+      const seal = await sdk.getSealV2(rid, bidder);
+      if (!seal) {
+        result.skipped.push({ bidder, reason: "seal expired/absent" });
+        continue;
+      }
+
+      let envelope: PayloadEnvelope;
+      try {
+        envelope = await opener(new Uint8Array(seal.ciphertext), drand);
+      } catch (error) {
+        result.skipped.push({
+          bidder,
+          reason: `decrypt failed: ${errorName(error)}`,
+        });
+        continue;
+      }
+
+      try {
+        await sdk.revealV2({ roundId: rid, bidder, envelope });
+        result.revealed.push(bidder);
+        log(`revealed v2 submission from ${bidder}`);
+      } catch (error) {
+        if (errorMatches(error, IDEMPOTENT_REVEAL)) {
+          result.skipped.push({ bidder, reason: "already revealed (race)" });
+        } else if (errorMatches(error, ["HashMismatch", "MalformedPayload"])) {
+          result.skipped.push({ bidder, reason: "invalid or corrupt payload" });
+        } else if (errorMatches(error, ["RevealWindowClosed"])) {
+          result.skipped.push({ bidder, reason: "reveal window closed" });
+        } else {
+          throw error;
+        }
+      }
+    }
+    round = await sdk.getRoundV2(rid);
+  } else if (round.status.tag !== "Open") {
+    log(`round ${rid} v2 is ${round.status.tag}; nothing to reveal`);
+  }
+
+  result.finalStatus = round.status.tag;
+  return result;
+}
+
 export interface CloseResult {
   roundId: bigint;
   cleared: boolean;
@@ -293,6 +422,85 @@ export async function closeRound(
   } else if (round.status.tag === "Settled") {
     result.skipped.push("already settled");
   } else if (round.status.tag === "Voided") {
+    result.skipped.push("voided (escrow refunded at clear)");
+  }
+
+  if (result.winner === undefined && round.winner != null) {
+    result.winner = round.winner;
+  }
+  result.finalStatus = round.status.tag;
+  return result;
+}
+
+/** Finalize a Core v2 round. ReceiptOnly rounds complete during clearV2;
+ * Auction rounds continue through escrow settlement. */
+export async function closeRoundV2(
+  deps: KeeperDeps,
+  roundId: bigint | number,
+): Promise<CloseResult> {
+  const { sdk, log = () => {} } = deps;
+  const rid = BigInt(roundId);
+  const result: CloseResult = {
+    roundId: rid,
+    cleared: false,
+    settled: false,
+    voided: false,
+    winner: undefined,
+    finalStatus: "",
+    skipped: [],
+  };
+
+  let round = await sdk.getRoundV2(rid);
+  if (round.status.tag === "Revealing") {
+    const now = Math.floor(Date.now() / 1000);
+    if (now <= Number(round.reveal_deadline)) {
+      result.skipped.push(`reveal window open until ${round.reveal_deadline}`);
+      result.finalStatus = round.status.tag;
+      return result;
+    }
+    try {
+      result.winner = await sdk.clearV2(rid);
+      result.cleared = true;
+      log(`cleared v2 round ${rid}`);
+    } catch (error) {
+      if (
+        errorMatches(error, [
+          "AlreadyCleared",
+          "AlreadySettled",
+          "RevealStillOpen",
+          "WrongStatus",
+          "RoundVoided",
+        ])
+      ) {
+        result.skipped.push(`clear_v2 skipped: ${errorName(error)}`);
+      } else {
+        throw error;
+      }
+    }
+    round = await sdk.getRoundV2(rid);
+  }
+
+  if (round.status.tag === "Cleared") {
+    try {
+      await sdk.settleV2(rid);
+      result.settled = true;
+      log(`settled v2 auction ${rid}`);
+    } catch (error) {
+      if (errorMatches(error, ["AlreadySettled", "NotCleared", "WrongStatus"])) {
+        result.skipped.push(`settle_v2 skipped: ${errorName(error)}`);
+      } else {
+        throw error;
+      }
+    }
+    round = await sdk.getRoundV2(rid);
+  } else if (round.status.tag === "Settled") {
+    if (round.mode.tag === "ReceiptOnly" && result.cleared) {
+      result.settled = true;
+    } else {
+      result.skipped.push("already settled");
+    }
+  } else if (round.status.tag === "Voided") {
+    result.voided = true;
     result.skipped.push("voided (escrow refunded at clear)");
   }
 

@@ -5,13 +5,13 @@ use soroban_sdk::{
     Address, Bytes, Env, IntoVal, Symbol,
 };
 
-use crate::storage::{get_round, set_round};
-use crate::types::{ClearingRule, DataKey, Error, Status};
+use crate::storage::{get_round, get_round_v2, set_round, set_round_v2};
+use crate::types::{ClearingRule, DataKey, Error, RoundMode, SettlementConfig, Status};
 
 use super::{
     assert_try_create_round_err, assert_try_contract_err, b32, commit_bid, commitment,
-    drand_round, funded_bidder, open_round, real_sig, setup, setup_drand, Fixture, GENESIS,
-    PERIOD, VEC_ROUND,
+    drand_round, drand_round_v2, funded_bidder, open_round, payload_envelope, real_sig,
+    setup, setup_drand, Fixture, GENESIS, PERIOD, VEC_ROUND,
 };
 
 const MAX_BIDDERS: u32 = 500;
@@ -45,6 +45,10 @@ const ERROR_PATH_REGISTRY: &[(Error, &'static str)] = &[
     (Error::NoValidBids, "error_path_no_valid_bids"),
     (Error::RoundFull, "error_path_round_full"),
     (Error::InvalidLimit, "error_path_invalid_limit"),
+    (Error::UnsupportedVersion, "error_path_unsupported_version"),
+    (Error::MalformedPayload, "error_path_malformed_payload"),
+    (Error::EscrowNotAllowed, "error_path_escrow_not_allowed"),
+    (Error::RoundDurationTooLong, "error_path_round_duration_too_long"),
 ];
 
 fn oversized_bytes(env: &Env, len: u32) -> Bytes {
@@ -87,7 +91,7 @@ fn settle_happy_path(f: &Fixture, t_reveal: u64, commit_deadline: u64, reveal_de
 fn error_paths_registry_covers_every_variant() {
     assert_eq!(
         ERROR_PATH_REGISTRY.len(),
-        27,
+        31,
         "update ERROR_PATH_REGISTRY when adding/removing Error variants"
     );
     for (variant, name) in ERROR_PATH_REGISTRY {
@@ -534,4 +538,120 @@ fn error_path_invalid_limit() {
     let id = open_round(&f, &operator);
     assert_try_contract_err(f.client.try_get_bidders_page(&id, &0, &0), Error::InvalidLimit);
     assert_try_contract_err(f.client.try_get_bidders_page(&id, &0, &101), Error::InvalidLimit);
+}
+
+#[test]
+fn error_path_unsupported_version() {
+    let (f, _t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+    let id = drand_round_v2(
+        &f,
+        &operator,
+        commit_deadline,
+        reveal_deadline,
+        RoundMode::ReceiptOnly,
+        1,
+    );
+    f.env.as_contract(&f.client.address, || {
+        let mut round = get_round_v2(&f.env, id).unwrap();
+        round.protocol_version = 99;
+        set_round_v2(&f.env, id, &round);
+    });
+    let bidder = Address::generate(&f.env);
+    assert_try_contract_err(
+        f.client.try_commit_v2(
+            &id,
+            &bidder,
+            &b32(&f.env, 1),
+            &Bytes::from_array(&f.env, b"sealed"),
+            &0,
+            &Bytes::from_array(&f.env, b"id"),
+        ),
+        Error::UnsupportedVersion,
+    );
+}
+
+#[test]
+fn error_path_malformed_payload() {
+    let (f, t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+    let id = drand_round_v2(
+        &f,
+        &operator,
+        commit_deadline,
+        reveal_deadline,
+        RoundMode::ReceiptOnly,
+        1,
+    );
+    let bidder = Address::generate(&f.env);
+    let malformed = Bytes::from_array(&f.env, b"not-an-envelope");
+    let commitment = f.env.crypto().sha256(&malformed).to_bytes();
+    f.client.commit_v2(
+        &id,
+        &bidder,
+        &commitment,
+        &Bytes::from_array(&f.env, b"sealed"),
+        &0,
+        &Bytes::from_array(&f.env, b"id"),
+    );
+    f.env.ledger().with_mut(|ledger| ledger.timestamp = t_reveal + 1);
+    f.client.open_reveal_v2(&id, &real_sig(&f.env));
+    assert_try_contract_err(
+        f.client.try_reveal_v2(&id, &bidder, &malformed),
+        Error::MalformedPayload,
+    );
+}
+
+#[test]
+fn error_path_escrow_not_allowed() {
+    let (f, _t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+    let id = drand_round_v2(
+        &f,
+        &operator,
+        commit_deadline,
+        reveal_deadline,
+        RoundMode::ReceiptOnly,
+        1,
+    );
+    let bidder = funded_bidder(&f, 1);
+    let envelope = payload_envelope(&f.env, None, b"proposal", 1);
+    let commitment = f.env.crypto().sha256(&envelope).to_bytes();
+    assert_try_contract_err(
+        f.client.try_commit_v2(
+            &id,
+            &bidder,
+            &commitment,
+            &Bytes::from_array(&f.env, b"sealed"),
+            &1,
+            &Bytes::from_array(&f.env, b"id"),
+        ),
+        Error::EscrowNotAllowed,
+    );
+}
+
+#[test]
+fn error_path_round_duration_too_long() {
+    let f = setup();
+    let operator = Address::generate(&f.env);
+    assert_try_create_round_err(
+        f.client.try_create_round_v2(
+            &operator,
+            &b32(&f.env, 1),
+            &b32(&f.env, 2),
+            &SettlementConfig {
+                mode: RoundMode::Auction,
+                payment_asset: None,
+                lot_asset: None,
+                lot_amount: 0,
+            },
+            &4_000_000,
+            &ClearingRule::HighestBid,
+            &1_500,
+            &4_000_100,
+            &Bytes::from_array(&f.env, b"auditor"),
+            &1,
+        ),
+        Error::RoundDurationTooLong,
+    );
 }
