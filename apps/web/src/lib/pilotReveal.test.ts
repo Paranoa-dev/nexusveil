@@ -23,7 +23,15 @@ test("keeps a revealing round actionable for unfinished submissions", () => {
   assert.deepEqual(pilotRevealAction("Revealing", false, 30), {
     visible: true,
     ready: true,
-    label: "Open + reveal",
+    label: "Reveal submissions",
+  });
+});
+
+test("disables the action when every submission is already revealed", () => {
+  assert.deepEqual(pilotRevealAction("Revealing", true, 0, true), {
+    visible: true,
+    ready: false,
+    label: "Reveal complete",
   });
 });
 

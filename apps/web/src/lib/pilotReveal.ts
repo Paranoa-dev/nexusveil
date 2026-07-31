@@ -16,9 +16,12 @@ export function pilotRevealAction(
   status: string,
   drandPublished: boolean,
   secondsRemaining: number,
+  allSubmissionsRevealed = false,
 ): PilotRevealAction {
   if (status === "Revealing") {
-    return { visible: true, ready: true, label: "Open + reveal" };
+    return allSubmissionsRevealed
+      ? { visible: true, ready: false, label: "Reveal complete" }
+      : { visible: true, ready: true, label: "Reveal submissions" };
   }
 
   if (status !== "Open") {

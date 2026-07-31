@@ -37,6 +37,10 @@ import { useDrandCountdown } from "../hooks/useDrandCountdown";
 import { useToast } from "../ui/Toast";
 import { pilotRevealAction } from "../lib/pilotReveal";
 import {
+  isRevealAlreadyOpen,
+  isSubmissionAlreadyRevealed,
+} from "../lib/pilotConcurrency";
+import {
   decodePilotSubmission,
   type PilotSubmissionView,
 } from "../lib/pilotSubmission";
@@ -82,6 +86,11 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
     round?.status.tag ?? "Unknown",
     revealCountdown.published,
     revealCountdown.secondsRemaining,
+    Boolean(
+      round &&
+      round.bidders.length > 0 &&
+      revealedSubmissions.length === round.bidders.length,
+    ),
   );
   const submissionIsAuction = round
     ? round.mode.tag === "Auction"
@@ -261,42 +270,75 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
     try {
       const rid = BigInt(roundId);
       const drand = quicknet();
-      let current = round;
+      let current = (
+        await contract.get_round_v2({ round_id: rid })
+      ).result.unwrap();
+      if (current.status.tag !== "Open" && current.status.tag !== "Revealing") {
+        await refresh();
+        toast.push(
+          "info",
+          "Reveal phase complete",
+          `Round is already ${current.status.tag.toLowerCase()}.`,
+        );
+        return;
+      }
+      let revealWasAlreadyOpen = current.status.tag !== "Open";
       if (current.status.tag === "Open") {
         const signature = await fetchRoundSignature(drand, Number(current.reveal_round));
-        const open = await contract.open_reveal_v2({
-          round_id: rid,
-          drand_signature: Buffer.from(signature),
-        });
-        await open.signAndSend();
+        try {
+          const open = await contract.open_reveal_v2({
+            round_id: rid,
+            drand_signature: Buffer.from(signature),
+          });
+          await open.signAndSend();
+        } catch (error) {
+          if (!isRevealAlreadyOpen(error)) throw error;
+          revealWasAlreadyOpen = true;
+        }
         current = (await contract.get_round_v2({ round_id: rid })).result.unwrap();
+        if (current.status.tag === "Open") {
+          throw new Error("Reveal state has not propagated yet. Refresh and retry.");
+        }
       }
       const bidders = (await contract.get_bidders_v2({ round_id: rid })).result.unwrap();
       let revealedCount = 0;
+      let alreadyRevealedCount = 0;
       for (const bidder of bidders) {
         const state = (
           await contract.get_submission_v2({ round_id: rid, bidder })
         ).result.unwrap();
-        if (state.revealed_envelope != null) continue;
+        if (state.revealed_envelope != null) {
+          alreadyRevealedCount += 1;
+          continue;
+        }
         const seal = (await contract.get_seal_v2({ round_id: rid, bidder })).result;
-        if (!seal) continue;
+        if (!seal) throw new Error(`Encrypted submission is unavailable for ${shortAddress(bidder)}`);
         const envelope = await openPayload(new Uint8Array(seal.ciphertext), drand);
-        const reveal = await contract.reveal_v2({
-          round_id: rid,
-          bidder,
-          envelope: Buffer.from(encodePayloadEnvelope(envelope)),
-        });
-        await reveal.signAndSend();
-        revealedCount += 1;
+        try {
+          const reveal = await contract.reveal_v2({
+            round_id: rid,
+            bidder,
+            envelope: Buffer.from(encodePayloadEnvelope(envelope)),
+          });
+          await reveal.signAndSend();
+          revealedCount += 1;
+        } catch (error) {
+          if (!isSubmissionAlreadyRevealed(error)) throw error;
+          alreadyRevealedCount += 1;
+        }
       }
       await refresh();
-      toast.push(
-        "success",
-        "Decryption complete",
-        revealedCount > 0
-          ? `${revealedCount} submission(s) revealed`
-          : "All submissions were already revealed",
-      );
+      if (revealedCount > 0) {
+        toast.push("success", "Decryption complete", `${revealedCount} submission(s) revealed`);
+      } else {
+        toast.push(
+          "info",
+          revealWasAlreadyOpen ? "Reveal already opened" : "Nothing new to reveal",
+          alreadyRevealedCount === bidders.length
+            ? "All submissions are already public."
+            : "Round state was refreshed.",
+        );
+      }
     } catch (error) {
       toast.push("error", "Reveal failed", displayError(error));
     } finally {
