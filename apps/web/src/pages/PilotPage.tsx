@@ -36,6 +36,10 @@ import { pilotRoundIdFromHash } from "../config/routing";
 import { useDrandCountdown } from "../hooks/useDrandCountdown";
 import { useToast } from "../ui/Toast";
 import { pilotRevealAction } from "../lib/pilotReveal";
+import {
+  decodePilotSubmission,
+  type PilotSubmissionView,
+} from "../lib/pilotSubmission";
 
 type PilotTemplate = "proposal" | "auction";
 
@@ -63,6 +67,7 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
   const [lotAmount, setLotAmount] = useState("1");
   const [roundId, setRoundId] = useState(pilotRoundIdFromHash);
   const [round, setRound] = useState<RoundV2 | null>(null);
+  const [revealedSubmissions, setRevealedSubmissions] = useState<PilotSubmissionView[]>([]);
   const [price, setPrice] = useState("25000000000");
   const [escrow, setEscrow] = useState("25000000000");
   const [timelineDays, setTimelineDays] = useState("14");
@@ -115,6 +120,24 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
     const nextRound = tx.result.unwrap();
     setRound(nextRound);
     setTemplate(nextRound.mode.tag === "Auction" ? "auction" : "proposal");
+
+    const revealed = await Promise.all(
+      nextRound.bidders.map(async (bidder) => {
+        const submission = (
+          await reader.get_submission_v2({ round_id: BigInt(target), bidder })
+        ).result.unwrap();
+        if (submission.revealed_envelope == null) return null;
+        return decodePilotSubmission(
+          bidder,
+          nextRound.mode.tag,
+          new Uint8Array(submission.revealed_envelope),
+          submission.valid,
+        );
+      }),
+    );
+    setRevealedSubmissions(
+      revealed.filter((entry): entry is PilotSubmissionView => entry !== null),
+    );
   }
 
   useEffect(() => {
@@ -249,6 +272,7 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
         current = (await contract.get_round_v2({ round_id: rid })).result.unwrap();
       }
       const bidders = (await contract.get_bidders_v2({ round_id: rid })).result.unwrap();
+      let revealedCount = 0;
       for (const bidder of bidders) {
         const state = (
           await contract.get_submission_v2({ round_id: rid, bidder })
@@ -263,9 +287,16 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
           envelope: Buffer.from(encodePayloadEnvelope(envelope)),
         });
         await reveal.signAndSend();
+        revealedCount += 1;
       }
       await refresh();
-      toast.push("success", "Reveal pass complete", `${bidders.length} participant(s)`);
+      toast.push(
+        "success",
+        "Decryption complete",
+        revealedCount > 0
+          ? `${revealedCount} submission(s) revealed`
+          : "All submissions were already revealed",
+      );
     } catch (error) {
       toast.push("error", "Reveal failed", displayError(error));
     } finally {
@@ -504,6 +535,47 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
             <div className="pilot-empty">No round loaded</div>
           )}
         </section>
+
+        {round && (
+          <section className="pilot-panel pilot-results-panel">
+            <div className="pilot-panel-heading">
+              <span>Public after Drand reveal</span>
+              <strong>Decrypted submissions</strong>
+            </div>
+            {revealedSubmissions.length > 0 ? (
+              <div className="pilot-results">
+                {revealedSubmissions.map((submission) => (
+                  <article className="pilot-result" key={submission.bidder}>
+                    <div className="pilot-result-heading">
+                      <code>{shortAddress(submission.bidder)}</code>
+                      <span className={submission.valid ? "valid" : "invalid"}>
+                        {submission.valid ? "Verified" : "Invalid"}
+                      </span>
+                    </div>
+                    <dl>
+                      <div><dt>Private price / bid</dt><dd>{submission.amount ?? "None"}</dd></div>
+                      {submission.timelineDays != null && (
+                        <div><dt>Timeline</dt><dd>{submission.timelineDays} day(s)</dd></div>
+                      )}
+                      {submission.approach && (
+                        <div><dt>Approach</dt><dd>{submission.approach}</dd></div>
+                      )}
+                      {submission.payload && (
+                        <div><dt>Payload</dt><dd>{submission.payload}</dd></div>
+                      )}
+                    </dl>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="pilot-empty">
+                {round.status.tag === "Open"
+                  ? "Submissions remain encrypted until the Drand reveal."
+                  : "No decrypted submissions yet."}
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </main>
   );
