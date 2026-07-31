@@ -46,11 +46,10 @@ export function LandingPage({
         </button>
         <div className="landing-nav-actions">
           <span className="landing-status-pill winner">Hack Privacy #1</span>
-          <span className="landing-status-pill">testnet · live</span>
           <a href="https://github.com/karagozemin/Sub-Rosa" target="_blank" rel="noreferrer">
             GitHub
           </a>
-          <a href="#/docs">Docs</a>
+          <a href="#/docs" target="_blank" rel="noreferrer">Docs</a>
           <a href="#/dashboard" className="secondary-action compact">
             Dashboard
           </a>
@@ -99,7 +98,7 @@ export function LandingPage({
             <a className="secondary-action" href="#/architecture">
               Read the architecture
             </a>
-            <a className="secondary-action" href="#/docs">
+            <a className="secondary-action" href="#/docs" target="_blank" rel="noreferrer">
               Integration docs
             </a>
             <a className="secondary-action" href="#/pilot">

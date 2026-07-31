@@ -10,7 +10,7 @@ export function ArchitecturePage({ goHome }: { goHome: () => void }) {
           <span>Sub Rosa</span>
         </button>
         <div className="architecture-nav-actions">
-          <a href="#/docs" className="secondary-action compact">Integration docs</a>
+          <a href="#/docs" target="_blank" rel="noreferrer" className="secondary-action compact">Integration docs</a>
           <button type="button" className="secondary-action compact" onClick={goHome}>
             Back to demo
           </button>

@@ -143,8 +143,7 @@
 .docs-shell {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
-  width: min(1440px, 100%);
-  margin: 0 auto;
+  width: 100%;
 }
 
 .docs-sidebar {
@@ -181,16 +180,20 @@
 .docs-nav-group button {
   display: block;
   width: 100%;
-  min-height: 32px;
-  padding: 0 8px;
+  min-height: 34px;
+  margin-top: 5px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 5px;
   color: var(--muted);
+  background: rgba(255, 255, 255, 0.012);
   font-size: 0.83rem;
   text-align: left;
 }
 
 .docs-nav-group button:hover {
   color: var(--ink);
+  border-color: var(--line-strong);
   background: var(--surface-1);
 }
 

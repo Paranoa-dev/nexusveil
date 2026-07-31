@@ -480,8 +480,7 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
           <span>Sub Rosa</span>
         </button>
         <div className="pilot-nav-actions">
-          <span className="pilot-network">Testnet · Core v2</span>
-          <a href="#/docs" className="secondary-action compact">Docs</a>
+          <a href="#/docs" target="_blank" rel="noreferrer" className="secondary-action compact">Docs</a>
           <button
             type="button"
             className="secondary-action compact"
