@@ -33,7 +33,9 @@ import {
 } from "../lib/chain";
 import { LOGO_SRC } from "../lib/chain";
 import { pilotRoundIdFromHash } from "../config/routing";
+import { useDrandCountdown } from "../hooks/useDrandCountdown";
 import { useToast } from "../ui/Toast";
+import { pilotRevealAction } from "../lib/pilotReveal";
 
 type PilotTemplate = "proposal" | "auction";
 
@@ -68,6 +70,14 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const contract = useWalletContract(address);
   const reader = useReadOnlyContract();
+  const revealCountdown = useDrandCountdown(
+    round ? Number(round.reveal_round) : 0,
+  );
+  const revealAction = pilotRevealAction(
+    round?.status.tag ?? "Unknown",
+    revealCountdown.published,
+    revealCountdown.secondsRemaining,
+  );
   const submissionIsAuction = round
     ? round.mode.tag === "Auction"
     : template === "auction";
@@ -223,6 +233,7 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
 
   async function revealAll() {
     if (!contract || !round || !roundId) return;
+    if (round.status.tag === "Open" && !revealCountdown.published) return;
     setBusy("reveal");
     try {
       const rid = BigInt(roundId);
@@ -471,8 +482,15 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
               <div className="pilot-actions">
                 <button type="button" className="secondary-action compact" onClick={copyLink}>Copy link</button>
                 <button type="button" className="secondary-action compact" onClick={() => refresh()}>Refresh</button>
-                {(round.status.tag === "Open" || round.status.tag === "Revealing") && (
-                  <button type="button" className="secondary-action compact" onClick={revealAll} disabled={!address || busy !== null}>Open + reveal</button>
+                {revealAction.visible && (
+                  <button
+                    type="button"
+                    className="secondary-action compact"
+                    onClick={revealAll}
+                    disabled={!address || busy !== null || !revealAction.ready}
+                  >
+                    {revealAction.label}
+                  </button>
                 )}
                 {round.status.tag === "Revealing" && (
                   <button type="button" className="secondary-action compact" onClick={clearRound} disabled={!address || busy !== null}>Clear</button>

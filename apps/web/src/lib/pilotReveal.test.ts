@@ -1,0 +1,32 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { pilotRevealAction } from "./pilotReveal.js";
+
+test("keeps an open round locked until its Drand round is published", () => {
+  assert.deepEqual(pilotRevealAction("Open", false, 102), {
+    visible: true,
+    ready: false,
+    label: "Reveal in 1:42",
+  });
+});
+
+test("enables reveal once the Drand round is published", () => {
+  assert.deepEqual(pilotRevealAction("Open", true, 0), {
+    visible: true,
+    ready: true,
+    label: "Open + reveal",
+  });
+});
+
+test("keeps a revealing round actionable for unfinished submissions", () => {
+  assert.deepEqual(pilotRevealAction("Revealing", false, 30), {
+    visible: true,
+    ready: true,
+    label: "Open + reveal",
+  });
+});
+
+test("hides reveal action after the reveal phase", () => {
+  assert.equal(pilotRevealAction("Cleared", true, 0).visible, false);
+});
