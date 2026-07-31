@@ -53,7 +53,7 @@ export function LandingPage({
           <a href="#/dashboard" className="secondary-action compact">
             Dashboard
           </a>
-          <a href="#/pilot" className="primary-action compact">
+          <a href="#/pilot" target="_blank" rel="noreferrer" className="primary-action compact">
             Pilot workspace
           </a>
         </div>
@@ -101,7 +101,7 @@ export function LandingPage({
             <a className="secondary-action" href="#/docs" target="_blank" rel="noreferrer">
               Integration docs
             </a>
-            <a className="secondary-action" href="#/pilot">
+            <a className="secondary-action" href="#/pilot" target="_blank" rel="noreferrer">
               Run a testnet pilot
             </a>
           </motion.div>

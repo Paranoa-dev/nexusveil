@@ -390,7 +390,7 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
         <div className="docs-top-actions">
           <span className="docs-version">SDK v0.2.0</span>
           <a href="https://github.com/karagozemin/Sub-Rosa" target="_blank" rel="noreferrer"><Code2 size={17} />GitHub</a>
-          <a href="#/pilot" className="docs-pilot-link">Open pilot<ArrowRight size={16} /></a>
+          <a href="#/pilot" target="_blank" rel="noreferrer" className="docs-pilot-link">Open pilot<ArrowRight size={16} /></a>
           <button type="button" className="docs-mobile-menu" onClick={() => setMobileNav((value) => !value)} aria-label="Toggle documentation navigation">
             {mobileNav ? <X size={20} /> : <Menu size={20} />}
           </button>
@@ -565,7 +565,7 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
               {["Pin the network passphrase, RPC, contract ID, and expected WASM hash", "Run contract, SDK, bindings, tlock, keeper, web, and package tarball tests", "Simulate lot custody and every bidder escrow authorization", "Operate a monitored keeper with retry and duplicate suppression", "Export and independently verify a settled test round receipt", "Define void ownership and incident response for missed reveal windows", "Complete an independent Soroban funds-handling review before mainnet", "Start with explicit value and participant caps"].map((item) => <div key={item}><CheckCircle2 size={18} /><span>{item}</span></div>)}
             </div>
             <CodeBlock label="Terminal" code={`pnpm contract:test\npnpm tlock:test\npnpm bindings:check\npnpm sdk:test\npnpm keeper:test\npnpm packages:pack\npnpm web:test\npnpm web:build`} />
-            <div className="docs-next"><div><span>Ready to test?</span><h3>Run a real policy-enforced round on testnet.</h3></div><a href="#/pilot">Open pilot workspace<ArrowRight size={17} /></a></div>
+            <div className="docs-next"><div><span>Ready to test?</span><h3>Run a real policy-enforced round on testnet.</h3></div><a href="#/pilot" target="_blank" rel="noreferrer">Open pilot workspace<ArrowRight size={17} /></a></div>
           </section>
         </article>
       </div>
