@@ -1,19 +1,5 @@
 export type UseCaseId = "auction";
 
-/**
- * inputKind drives the commit form UI for each case while the underlying
- * commit/reveal pipeline stays identical. The numeric `value` is what we
- * actually seal on-chain; everything else is presentation.
- */
-export type InputKind = "ballot" | "score" | "amount";
-
-export interface BallotOption {
-  value: number;
-  label: string;
-  helper: string;
-  tone: "for" | "against" | "neutral";
-}
-
 export interface CaseExample {
   name: string;
   value: number;
@@ -27,26 +13,19 @@ export interface Peer {
   delayMs: number;
 }
 
-export type OutcomeKind = "tally" | "leaderboard" | "highest" | "distribution";
-
 export interface UseCase {
   id: UseCaseId;
   nav: string;
   tagline: string;
   title: string;
   oneLine: string;
-  inputKind: InputKind;
   inputLabel: string;
   defaultValue: number;
-  /** ballot only */
-  options?: BallotOption[];
-  /** score / amount only */
   min?: number;
   max?: number;
   step?: number;
-  /** amount only — quick pick chips */
   presets?: number[];
-  /** display unit (e.g. "USDC", "/ 10") */
+  /** display unit, e.g. "USDC" */
   unit?: string;
   /** label for the commit CTA — gives every case its own verb */
   commitCta: string;
@@ -64,7 +43,6 @@ export interface UseCase {
   };
   /** simulated peers that commit during the round to make the demo feel populated */
   cohort: Peer[];
-  outcomeKind: OutcomeKind;
 }
 
 const formatUsdc = (value: number): string =>
@@ -78,7 +56,6 @@ const USE_CASE_DEFINITIONS: UseCase[] = [
     title: "Run a sealed auction.",
     oneLine:
       "Bidders lock escrow, bids stay hidden until Drand R, and Soroban settles the winner and refunds losers.",
-    inputKind: "amount",
     inputLabel: "your bid",
     defaultValue: 500,
     min: 50,
@@ -109,7 +86,6 @@ const USE_CASE_DEFINITIONS: UseCase[] = [
       { name: "Bidder gamma", value: 410, delayMs: 7900 },
       { name: "Bidder delta", value: 600, delayMs: 11800 },
     ],
-    outcomeKind: "highest",
   },
 ];
 

@@ -198,8 +198,8 @@ export function LandingPage({
           testnet round receipts, and partner feedback.
         </p>
         <p>
-          Grants, judging, DAO polls, and RFP review panels stay as later templates; they no
-          longer lead the product story.
+          Partners integrate the same audited round lifecycle through the SDK without replacing
+          their marketplace or product workflow.
         </p>
       </motion.section>
 

@@ -49,7 +49,7 @@ See [docs/LIMITATIONS.md](./docs/LIMITATIONS.md) for honest scope (mainnet ≠ f
 
 Sub Rosa's next pilot target is a **sealed auction or competitive bid round**
 with a named Stellar ecosystem team, marketplace, asset issuer, or
-procurement-style workflow.
+auction platform.
 
 The pilot should prove more than "the code works": it should publish round IDs,
 participant count, total escrow, settlement/refund receipts, partner feedback,
@@ -214,5 +214,3 @@ pnpm mainnet:verify         # mainnet read-only proof
 - **Binding:** `H = sha256(value‖nonce)`
 - **Unlock:** round-R BLS verified on-chain before reveal
 - **Selective disclosure:** values public post-R; identities auditor-encrypted
-
-all done

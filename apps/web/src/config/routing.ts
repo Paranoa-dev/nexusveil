@@ -19,7 +19,7 @@ export function routeFromHash(): RouteState {
     return { page: "architecture", useCase: "auction" };
   }
   if (parts[0] === "dashboard") {
-    return { page: "dashboard", useCase: "grants" };
+    return { page: "dashboard", useCase: "auction" };
   }
   if (parts[0] === "demo" || parts[0] === "app") {
     const maybeCase = parts[1];
