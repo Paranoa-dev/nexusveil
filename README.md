@@ -32,6 +32,9 @@ Licensed under [MIT](./LICENSE).
 
 Both modes use the same versioned payload envelope, Drand reveal gate,
 permissionless lifecycle, public read surface, and deterministic receipt model.
+Partner rounds can be open or contract-enforced allowlist rounds. Auctions also
+enforce one identical escrow amount for every bidder, so differing public
+escrow values do not leak relative bid sizes before reveal.
 New partner workflows should be expressed as typed templates over these reviewed
 modes rather than custom settlement callbacks.
 
@@ -63,6 +66,7 @@ const roundId = await createAssetAuctionRound(client, {
   paymentAsset: usdcSac,
   lotAsset: collectibleSac,
   lotAmount: 1n,
+  fixedEscrow: 1_000n,
   revealRound,
   commitDeadline,
   revealDeadline,
@@ -75,7 +79,7 @@ const sealed = await sealAssetBid({
   amount: 700n,
 });
 
-await client.submitV2({ roundId, sealed, escrow: 1_000n });
+await client.submitV2({ roundId, sealed, escrow: 1_000n }); // must equal fixedEscrow
 ```
 
 See [packages/sdk/README.md](./packages/sdk/README.md) for both integration
@@ -107,10 +111,10 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system boundaries and
 
 | Field | Value |
 | --- | --- |
-| Contract | [`CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P`](https://stellar.expert/explorer/testnet/contract/CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P) |
-| WASM hash | `c6eb47b06b95f612361596944ce39f0545d3b11d93678952cef67dec09cce91e` |
-| Proposal proof | Round `4` - `ReceiptOnly` - settled with canonical payload envelope |
-| Atomic auction proof | Round `5` - `20 SRUSD` to seller and `1 SRLOT` to winner |
+| Contract | [`CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV`](https://stellar.expert/explorer/testnet/contract/CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV) |
+| WASM hash | `2c7bc6b4c91940ac185df38a3d0a8532b555140d818df94f03f894e5952ebf42` |
+| Proposal proof | Round `2` - allowlisted `ReceiptOnly` - settled and receipt verified |
+| Atomic auction proof | Round `3` - fixed escrow - `20 SRUSD` to seller and `1 SRLOT` to winner |
 
 ### Mainnet protocol proof
 

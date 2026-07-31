@@ -5,6 +5,7 @@ export {
   type CommitParams,
   type RevealParams,
   type CreateRoundV2Params,
+  type CreatePartnerRoundV2Params,
   type CommitV2Params,
   type RevealV2Params,
   type ClearingRuleTag,
@@ -123,6 +124,14 @@ export {
   RECEIPT_VERSION,
 } from "./receipt.js";
 export {
+  CORE_V2_RECEIPT_VERSION,
+  parseReceiptV2,
+  serializeReceiptV2,
+  verifyReceiptV2,
+  type CoreV2Receipt,
+  type CoreV2SubmissionReceipt,
+} from "./receipt-v2.js";
+export {
   redactReceipt,
   type RedactOptions,
 } from "./redact.js";
@@ -161,6 +170,7 @@ export {
   Errors as RoundErrors,
   type Round,
   type RoundV2,
+  type RoundPolicyV2,
   type RoundMode,
   type SettlementConfig,
   type BidState,

@@ -9,7 +9,7 @@ use soroban_sdk::testutils::storage::Temporary as TemporaryStorageTest;
 use crate::drand;
 use crate::storage::{seal_ttl_for_reveal_deadline, TEMP_THRESHOLD};
 use crate::types::{
-    ClearingRule, DataKey, Error, GlobalConfig, RoundMode, SettlementConfig, Status,
+    ClearingRule, DataKey, Error, GlobalConfig, RoundMode, RoundPolicyV2, SettlementConfig, Status,
 };
 use crate::{SubRosaRound, SubRosaRoundClient};
 
@@ -1717,6 +1717,70 @@ fn v2_stale_void_refunds_escrow_and_returns_lot() {
     assert_eq!(lot_token.balance(&f.client.address), 0);
 }
 
+#[test]
+fn v2_partner_policy_enforces_fixed_escrow_and_allowlist() {
+    let (f, _t_reveal, commit_deadline, reveal_deadline) = setup_drand();
+    let operator = Address::generate(&f.env);
+    let allowed = funded_bidder(&f, 2_000);
+    let blocked = funded_bidder(&f, 2_000);
+    let lot_issuer = Address::generate(&f.env);
+    let lot_sac = f.env.register_stellar_asset_contract_v2(lot_issuer);
+    let lot_asset = lot_sac.address();
+    token::StellarAssetClient::new(&f.env, &lot_asset).mint(&operator, &1);
+    let policy = RoundPolicyV2 {
+        settlement: SettlementConfig {
+            mode: RoundMode::Auction,
+            payment_asset: Some(f.usdc_token.address.clone()),
+            lot_asset: Some(lot_asset),
+            lot_amount: 1,
+        },
+        fixed_escrow: 1_000,
+        eligible_participants: Vec::from_array(&f.env, [allowed.clone()]),
+    };
+    let id = f.client.create_partner_round_v2(
+        &operator,
+        &b32(&f.env, 0xAB),
+        &b32(&f.env, 0xCD),
+        &policy,
+        &VEC_ROUND,
+        &ClearingRule::HighestBid,
+        &commit_deadline,
+        &reveal_deadline,
+        &Bytes::from_array(&f.env, b"auditor"),
+        &5,
+    );
+    let stored = f.client.get_round_policy_v2(&id).unwrap();
+    assert_eq!(stored.fixed_escrow, 1_000);
+    assert_eq!(stored.eligible_participants, policy.eligible_participants);
+
+    let envelope = payload_envelope(&f.env, Some(700), b"bid", 0x66);
+    let commitment = f.env.crypto().sha256(&envelope).to_bytes();
+    assert_try_contract_err(
+        f.client.try_commit_v2(
+            &id,
+            &allowed,
+            &commitment,
+            &Bytes::from_array(&f.env, b"sealed-v2"),
+            &999,
+            &Bytes::from_array(&f.env, b"id-v2"),
+        ),
+        Error::EscrowPolicyMismatch,
+    );
+    assert_try_contract_err(
+        f.client.try_commit_v2(
+            &id,
+            &blocked,
+            &commitment,
+            &Bytes::from_array(&f.env, b"sealed-v2"),
+            &1_000,
+            &Bytes::from_array(&f.env, b"id-v2"),
+        ),
+        Error::ParticipantNotEligible,
+    );
+    commit_payload_v2(&f, id, &allowed, &envelope, 1_000);
+    assert_eq!(f.usdc_token.balance(&f.client.address), 1_000);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ISSUE #160 — ERROR CODE DOCUMENTATION CONSISTENCY
 //
@@ -1772,6 +1836,8 @@ pub(super) const DOCUMENTED_ERROR_CODES: &[(Error, u32)] = &[
     (Error::MalformedPayload, 41),
     (Error::EscrowNotAllowed, 42),
     (Error::RoundDurationTooLong, 43),
+    (Error::ParticipantNotEligible, 44),
+    (Error::EscrowPolicyMismatch, 45),
 ];
 
 /// Convert an `Error` to its on-chain discriminant using the [`repr(u32)`]
@@ -1814,6 +1880,8 @@ pub(super) fn variant_name(e: Error) -> &'static str {
         Error::MalformedPayload => "MalformedPayload",
         Error::EscrowNotAllowed => "EscrowNotAllowed",
         Error::RoundDurationTooLong => "RoundDurationTooLong",
+        Error::ParticipantNotEligible => "ParticipantNotEligible",
+        Error::EscrowPolicyMismatch => "EscrowPolicyMismatch",
     }
 }
 
@@ -1861,7 +1929,7 @@ fn error_table_enumerates_every_variant() {
     // DOCUMENTED_ERROR_CODES.
     assert_eq!(
         DOCUMENTED_ERROR_CODES.len(),
-        31,
+        33,
         "DOCUMENTED_ERROR_CODES appears missing entries. The exhaustive \
          `variant_name` match already enforces parity at compile time — \
          update it together with this list and contracts/round/ERRORS.md."
@@ -1873,12 +1941,12 @@ fn error_codes_use_reserved_ranges() {
     // Range policy enforced by the documentation:
     //   1–4     → initialization/lookup
     //   10–22   → lifecycle/timing
-    //   30–43   → crypto/validation
+    //   30–45   → crypto/validation
     // New categories should pick a fresh, contiguous range — not collide with
     // logging conventions — and update ERRORS.md at the same time.
     for (variant, code) in DOCUMENTED_ERROR_CODES {
         let name = variant_name(*variant);
-        let in_range = matches!(*code, 1..=4 | 10..=22 | 30..=43);
+        let in_range = matches!(*code, 1..=4 | 10..=22 | 30..=45);
         assert!(
             in_range,
             "{name} = {code} falls outside the documented code ranges; \

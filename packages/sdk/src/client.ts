@@ -19,6 +19,7 @@ import {
   type GlobalConfig,
   type Round,
   type RoundMode,
+  type RoundPolicyV2,
   type RoundV2,
   type Seal,
   type SettlementConfig,
@@ -31,6 +32,7 @@ import type {
   SealedPayload,
 } from "@sub-rosa/tlock";
 import type { RoundReceipt } from "./receipt.js";
+import type { CoreV2Receipt } from "./receipt-v2.js";
 import { validateEncryptedBlob } from "./encrypted-blob.js";
 import { networkFingerprint } from "./receipt.js";
 import type { TransactionSubmitter } from "./submitter.js";
@@ -158,6 +160,13 @@ export interface CreateRoundV2Params {
   operator?: string;
 }
 
+export interface CreatePartnerRoundV2Params extends CreateRoundV2Params {
+  /** Identical public escrow required from every Auction participant. Must be zero for ReceiptOnly. */
+  fixedEscrow: bigint;
+  /** Empty or omitted means open participation; otherwise only these addresses may commit. */
+  eligibleParticipants?: string[];
+}
+
 export interface CommitV2Params {
   roundId: number | bigint;
   /** Structured seal produced by @sub-rosa/tlock `sealPayload`. */
@@ -229,6 +238,40 @@ function v2RoundArgs(
     auditor_pubkey: toBuffer(params.auditorPubkey),
     max_participants,
   };
+}
+
+function partnerV2RoundArgs(
+  params: CreatePartnerRoundV2Params,
+  operator: string,
+) {
+  const { settlement, ...round } = v2RoundArgs(params, operator);
+  const eligibleParticipants = params.eligibleParticipants ?? [];
+  if (params.mode === "Auction" && params.fixedEscrow <= 0n) {
+    throw new SubRosaClientConfigError(
+      "Auction partner rounds require a positive fixedEscrow",
+    );
+  }
+  if (params.mode === "ReceiptOnly" && params.fixedEscrow !== 0n) {
+    throw new SubRosaClientConfigError(
+      "ReceiptOnly partner rounds require fixedEscrow to be zero",
+    );
+  }
+  if (eligibleParticipants.length > round.max_participants) {
+    throw new SubRosaClientConfigError(
+      "eligibleParticipants cannot exceed maxParticipants",
+    );
+  }
+  if (new Set(eligibleParticipants).size !== eligibleParticipants.length) {
+    throw new SubRosaClientConfigError(
+      "eligibleParticipants cannot contain duplicates",
+    );
+  }
+  const policy: RoundPolicyV2 = {
+    settlement,
+    fixed_escrow: params.fixedEscrow,
+    eligible_participants: eligibleParticipants,
+  };
+  return { ...round, policy };
 }
 
 export class SubRosaClient {
@@ -414,6 +457,18 @@ export class SubRosaClient {
     const operator = params.operator ?? this.#requireSource("operator");
     const tx = await this.#validatedContractCall(() =>
       this.contract.create_round_v2(v2RoundArgs(params, operator)),
+    );
+    return this.#sendUnwrap(tx);
+  }
+
+  async createPartnerRoundV2(
+    params: CreatePartnerRoundV2Params,
+  ): Promise<bigint> {
+    const operator = params.operator ?? this.#requireSource("operator");
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.create_partner_round_v2(
+        partnerV2RoundArgs(params, operator),
+      ),
     );
     return this.#sendUnwrap(tx);
   }
@@ -733,6 +788,20 @@ export class SubRosaClient {
     });
   }
 
+  /** Simulate `createPartnerRoundV2` without signing or submitting. */
+  preflightCreatePartnerRoundV2(
+    params: CreatePartnerRoundV2Params,
+  ): Promise<PreflightResult<bigint>> {
+    return this.#preflight("create_partner_round_v2", () => {
+      const operator = params.operator ?? this.#requireSource("operator");
+      return this.#validatedContractCall(() =>
+        this.contract.create_partner_round_v2(
+          partnerV2RoundArgs(params, operator),
+        ),
+      );
+    });
+  }
+
   /** Simulate `commitV2` without signing or submitting. */
   preflightCommitV2(params: CommitV2Params): Promise<PreflightResult<void>> {
     return this.#preflight("commit_v2", () => {
@@ -827,6 +896,17 @@ export class SubRosaClient {
       this.contract.get_round_v2({ round_id: normalizeRoundId(roundId) }),
     );
     return tx.result.unwrap();
+  }
+
+  async getRoundPolicyV2(
+    roundId: number | bigint,
+  ): Promise<RoundPolicyV2 | undefined> {
+    const tx = await this.#validatedContractCall(() =>
+      this.contract.get_round_policy_v2({
+        round_id: normalizeRoundId(roundId),
+      }),
+    );
+    return tx.result ?? undefined;
   }
 
   async getBidState(
@@ -991,6 +1071,83 @@ export class SubRosaClient {
       bids,
       winner: round.winner ?? null,
       winningValue: round.winning_bid?.toString() ?? null,
+      status: round.status.tag,
+    };
+  }
+
+  /** Export a canonical Core v2 receipt from durable round and submission state. */
+  async exportReceiptV2(roundId: number | bigint): Promise<CoreV2Receipt> {
+    const rid = normalizeRoundId(roundId);
+    const [round, config, bidders, policy] = await Promise.all([
+      this.getRoundV2(rid),
+      this.getConfig(),
+      this.getBiddersV2(rid),
+      this.getRoundPolicyV2(rid),
+    ]);
+    const submissions: CoreV2Receipt["submissions"] = {};
+    for (const bidder of bidders) {
+      const [state, seal] = await Promise.all([
+        this.getSubmissionV2(rid, bidder),
+        this.getSealV2(rid, bidder),
+      ]);
+      submissions[bidder] = {
+        commitment: toHex(state.commitment),
+        escrow: state.escrow.toString(),
+        revealedEnvelope: state.revealed_envelope
+          ? toHex(state.revealed_envelope)
+          : null,
+        revealedAmount: state.revealed_amount?.toString() ?? null,
+        valid: state.valid,
+        settled: state.settled,
+        evidence: {
+          ciphertext: seal ? toHex(seal.ciphertext) : null,
+          auditorBlob: seal ? toHex(seal.auditor_blob) : null,
+        },
+      };
+    }
+
+    return {
+      version: 2,
+      protocolVersion: 2,
+      network: this.networkPassphrase,
+      networkFingerprint: networkFingerprint(this.networkPassphrase),
+      contractId: this.contractId,
+      exportedAt: new Date().toISOString(),
+      roundId: rid.toString(),
+      itemRef: toHex(round.item_ref),
+      schemaRef: toHex(round.schema_ref),
+      mode: round.mode.tag,
+      paymentAsset: round.payment_asset ?? null,
+      lotAsset: round.lot_asset ?? null,
+      lotAmount: round.lot_amount.toString(),
+      revealRound: Number(round.reveal_round),
+      drandGenesis: config.drand_genesis.toString(),
+      drandPeriod: config.drand_period.toString(),
+      clearingRule: round.clearing_rule.tag,
+      commitDeadline: round.commit_deadline.toString(),
+      revealDeadline: round.reveal_deadline.toString(),
+      operator: round.operator,
+      auditorPubkey: toHex(round.auditor_pubkey),
+      maxParticipants: round.max_participants,
+      policy: policy
+        ? {
+            enforced: true,
+            fixedEscrow: policy.fixed_escrow.toString(),
+            participation: policy.eligible_participants.length === 0
+              ? "Open"
+              : "Allowlist",
+            eligibleParticipants: policy.eligible_participants,
+          }
+        : {
+            enforced: false,
+            fixedEscrow: null,
+            participation: "Open",
+            eligibleParticipants: [],
+          },
+      bidders,
+      submissions,
+      winner: round.winner ?? null,
+      winningAmount: round.winning_bid.toString(),
       status: round.status.tag,
     };
   }

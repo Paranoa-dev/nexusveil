@@ -242,6 +242,39 @@ test("create_round_v2 encodes schema, mode, and participant cap", () => {
   assert.equal(scValToNative(args[9]), 25);
 });
 
+test("create_partner_round_v2 encodes fixed escrow and participant allowlist", () => {
+  const c = newClient();
+  const allowed = [addr(7), addr(8)];
+  const args = c.spec.funcArgsToScVals("create_partner_round_v2", {
+    operator: addr(2),
+    item_ref: Buffer.from(u8(32, 3)),
+    schema_ref: Buffer.from(u8(32, 4)),
+    policy: {
+      settlement: {
+        mode: { tag: "Auction", values: undefined },
+        payment_asset: addr(5),
+        lot_asset: addr(6),
+        lot_amount: 1n,
+      },
+      fixed_escrow: 1_000n,
+      eligible_participants: allowed,
+    },
+    reveal_round: 19_283_746n,
+    clearing_rule: { tag: "HighestBid", values: undefined },
+    commit_deadline: 1_000n,
+    reveal_deadline: 2_000n,
+    auditor_pubkey: Buffer.from(u8(96, 5)),
+    max_participants: 2,
+  });
+
+  const policy = scValToNative(args[3]);
+  assert.equal(args.length, 10);
+  assert.equal(policy.fixed_escrow, 1_000n);
+  assert.deepEqual(policy.eligible_participants, allowed);
+  assert.deepEqual(policy.settlement.mode, ["Auction"]);
+  assert.equal(scValToNative(args[9]), 2);
+});
+
 test("reveal_v2 carries the complete canonical payload envelope", () => {
   const c = newClient();
   const envelope = encodePayloadEnvelope({

@@ -43,6 +43,11 @@ assets. `Auction` requires payment and lot SAC addresses, takes the lot into
 custody when the round is created, and exchanges payment for the lot atomically
 at settlement.
 
+Both helpers create contract-enforced partner rounds. Pass
+`eligibleParticipants` to restrict commits to a known cohort, or omit it for an
+open round. Auction rounds require `fixedEscrow`; every bidder must lock exactly
+that amount.
+
 ```ts
 import {
   createSealedProposalRound,
@@ -55,6 +60,7 @@ const roundId = await createSealedProposalRound(client, {
   commitDeadline,
   revealDeadline,
   auditorPubkey,
+  eligibleParticipants: [providerA, providerB], // optional
 });
 
 const sealed = await sealProposal({
@@ -81,6 +87,7 @@ const roundId = await createAssetAuctionRound(client, {
   paymentAsset: usdcSac,
   lotAsset: collectibleSac,
   lotAmount: 1n,
+  fixedEscrow: 1_000n,
   revealRound,
   commitDeadline,
   revealDeadline,
@@ -93,11 +100,11 @@ const sealed = await sealAssetBid({
   amount: 700n,
 });
 
-await client.submitV2({ roundId, sealed, escrow: 1_000n });
+await client.submitV2({ roundId, sealed, escrow: 1_000n }); // exact fixed escrow
 ```
 
 The creating wallet must hold and authorize transfer of `lotAmount`. Bidders
-must hold and authorize their public escrow cap. The SDK preflight methods can
+must hold and authorize the round's fixed escrow. The SDK preflight methods can
 simulate every state-changing call before signing.
 
 ## Low-level packages

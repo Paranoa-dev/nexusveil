@@ -40,7 +40,8 @@ Stellar application with a real auctionable lot.
 Minimum flow:
 
 1. Seller deposits one testnet lot into the round contract.
-2. At least three external bidders submit sealed bids and public escrow caps.
+2. At least three external bidders submit sealed bids using the same
+   contract-enforced fixed escrow.
 3. Drand opens the reveal for all submissions.
 4. The contract chooses the highest valid bid.
 5. One settlement transfers winner payment to the seller and the lot to the

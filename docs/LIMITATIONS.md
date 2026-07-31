@@ -17,7 +17,10 @@ Mainnet does **not** replay 700 / 459 USDC demo amounts. Mainnet smoke uses **1 
 ## Off-chain enforcement
 
 - **Mandate caps** (`maxBid`, `maxAppraisalSpend`) are verified by agent software, not the Soroban contract.
-- Only **escrow** and **bid ≤ escrow** are enforced on-chain at reveal.
+- Partner Auction rounds enforce one shared **fixed escrow** and
+  **bid ≤ fixed escrow** on-chain. Earlier Core v2 rounds may use variable caps.
+- Optional participant eligibility is an explicit public allowlist, not private
+  identity or KYC verification.
 - A malicious or buggy agent could exceed mandate caps if funded — see `docs/THREAT_MODEL.md`.
 
 ## Not in critical path
@@ -39,6 +42,9 @@ Round receipts (`docs/RECEIPTS.md`) are **offline only** — the verifier checks
 ## Operational
 
 - Drand quicknet must publish round R for reveal to open; keeper can void after grace if R never arrives.
+- Reveal opening is permissionless, but envelopes are decrypted and submitted
+  in separate bounded transactions. At least one UI or keeper must finish the
+  cohort; there is no single atomic reveal-all call.
 - Temporary storage expires after the reveal window — seals are not kept forever by design.
 - Mainnet wasm upload requires substantial XLM for resource fees (~30+ XLM observed).
 

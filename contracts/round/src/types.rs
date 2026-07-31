@@ -39,6 +39,8 @@ pub enum Error {
     MalformedPayload = 41,
     EscrowNotAllowed = 42,
     RoundDurationTooLong = 43,
+    ParticipantNotEligible = 44,
+    EscrowPolicyMismatch = 45,
 }
 
 /// Round lifecycle. Mirrors the state machine in PRD §6.
@@ -80,6 +82,18 @@ pub struct SettlementConfig {
     pub payment_asset: Option<Address>,
     pub lot_asset: Option<Address>,
     pub lot_amount: i128,
+}
+
+/// Optional partner policy stored separately from RoundV2 so existing deployed
+/// Core v2 round records remain readable after contract upgrades.
+#[contracttype]
+#[derive(Clone)]
+pub struct RoundPolicyV2 {
+    pub settlement: SettlementConfig,
+    /// Auction participants all lock this same public cap. Zero for ReceiptOnly.
+    pub fixed_escrow: i128,
+    /// Empty means open participation; otherwise only listed addresses may commit.
+    pub eligible_participants: Vec<Address>,
 }
 
 /// Contract-global configuration, set once at deploy in Instance storage.
@@ -215,4 +229,5 @@ pub enum DataKey {
     RoundV2(u64),
     SubmissionV2(u64, Address),
     SealV2(u64, Address),
+    PolicyV2(u64),
 }

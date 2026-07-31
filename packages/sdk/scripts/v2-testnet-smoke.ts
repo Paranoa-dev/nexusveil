@@ -12,11 +12,12 @@ import {
   createSealedProposalRound,
   sealProposal,
   SubRosaClient,
+  verifyReceiptV2,
 } from "../src/index.js";
 
 const RPC_URL = "https://soroban-testnet.stellar.org";
 const NETWORK = "Test SDF Network ; September 2015";
-const DEFAULT_CONTRACT_ID = "CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P";
+const DEFAULT_CONTRACT_ID = "CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -76,6 +77,7 @@ async function main() {
     revealDeadline,
     auditorPubkey: auditor.publicKey,
     maxParticipants: 5,
+    eligibleParticipants: [participant],
   });
   console.log(`created round ${roundId} (ReceiptOnly, R=${revealRound})`);
 
@@ -106,8 +108,9 @@ async function main() {
   await waitUntil(revealDeadline);
   await clearAfterLedgerCatchup(client, roundId);
 
-  const [round, submission, bidders] = await Promise.all([
+  const [round, policy, submission, bidders] = await Promise.all([
     client.getRoundV2(roundId),
+    client.getRoundPolicyV2(roundId),
     client.getSubmissionV2(roundId, participant),
     client.getBiddersV2(roundId),
   ]);
@@ -120,9 +123,17 @@ async function main() {
   if (bidders.length !== 1 || bidders[0] !== participant) {
     throw new Error("participant index does not match the committed proposal");
   }
+  if (!policy || policy.fixed_escrow !== 0n || policy.eligible_participants[0] !== participant) {
+    throw new Error("partner policy was not persisted correctly");
+  }
+  const receipt = await client.exportReceiptV2(roundId);
+  const verification = verifyReceiptV2(receipt);
+  if (!verification.valid) {
+    throw new Error(`receipt verification failed: ${JSON.stringify(verification.issues)}`);
+  }
 
   console.log("LIVE CORE V2 SMOKE PASSED");
-  console.log(JSON.stringify({ contractId, roundId: roundId.toString(), mode: round.mode.tag, status: round.status.tag, participants: bidders.length }));
+  console.log(JSON.stringify({ contractId, roundId: roundId.toString(), mode: round.mode.tag, status: round.status.tag, participants: bidders.length, policy: receipt.policy, receiptVerified: true }));
 }
 
 main().catch((error) => {

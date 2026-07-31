@@ -28,15 +28,17 @@
 | Threat | Mitigation | Residual |
 | --- | --- | --- |
 | Read ciphertext before R | tlock IBE — needs Drand round-R sig | None if Drand honest |
-| Operator skips reveal | Permissionless `open_reveal` + keeper | Liveness relies on someone running keeper |
-| Selective reveal one bid | Contract allows reveal-all; keeper reveals every seal | Keeper could delay but not permanently hide after R |
+| Operator skips reveal | Permissionless `open_reveal_v2` plus keeper retries | Liveness relies on at least one caller after Drand R |
+| Selective reveal one bid | Anyone can decrypt after R and submit each bidder's envelope; the ordered bidder set is public and capped at 25 | Reveals are separate transactions, not atomic; operators should run at least one keeper and monitor incomplete counts |
 
 ### Binding and fairness
 
 | Threat | Mitigation | Residual |
 | --- | --- | --- |
 | Bid change after commit | Commitment H binds value+nonce | Overwrite allowed before deadline — by design |
-| Invalid high bid | `valid = value ≤ escrow` excludes from clearing | Escrow still locked until settle |
+| Bid size leaks through escrow | Partner Auction rounds require identical `fixed_escrow` from every bidder | The common cap itself is public; bid values reveal after R by design |
+| Unauthorized participant | Optional on-chain allowlist checked by `commit_v2` | Open rounds intentionally admit any funded participant until the cap |
+| Invalid high bid | `valid = value ≤ fixed_escrow` excludes from clearing | Escrow still locked until settle |
 | Wrong clearing | Deterministic rule in contract | Operator sets rule at create_round |
 
 ### Funds
@@ -64,16 +66,16 @@
 
 ### Receipt verification
 
-`@sub-rosa/sdk`'s offline `verifyReceipt` checks the canonical JSON export
+`@sub-rosa/sdk`'s offline `verifyReceiptV2` checks the canonical JSON export
 against the round's commitments, clearing rule, and declared winner. The full
 schema and verifier surface lives in `docs/RECEIPTS.md`; this subsection only
 captures the threat-model-relevant surface.
 
 | Threat | Mitigation | Residual |
 | --- | --- | --- |
-| Forged receipt | Verifier recomputes `sha256(be16(value) ‖ nonce)` against the stored commitment for every revealed bid; winner is derived from a deterministic clearing rule, not trusted from the exporter | Exporter can still lie about on-chain facts the receipt does not bind to (see `docs/LIMITATIONS.md`); consumers should cross-check against current ledger state |
+| Forged receipt | Verifier recomputes SHA-256 over each full canonical payload envelope, checks fixed escrow and eligibility policy, and derives the winner from the ordered valid set | Exporter can still lie about on-chain facts; consumers should cross-check against current ledger state |
 | Tampered passphrase | `networkFingerprint = sha256(utf8(network))` is embedded in the receipt, so editing the claimed network invalidates the fingerprint | Operationally annoying but bounded — valid `null` ciphertext/auditorBlob after expiry is reported as a warning, not a failure |
-| Recycled / replayed receipt | Receipts are versioned (`version: 1`) and status-bound (`Cleared` / `Settled` / `Voided`); receipts are exported with the on-chain state at the time of export | A receipt from a later status can be presented as evidence of an earlier state — re-export and reconcile before relying on a receipt for high-value disputes |
+| Recycled / replayed receipt | Core receipts are versioned (`version: 2`) and status-bound (`Cleared` / `Settled` / `Voided`); receipts are exported with the on-chain state at the time of export | A receipt can still be stale; re-export and reconcile before relying on it for high-value disputes |
 | Single-exporter trust | Anyone can re-export the same round from the RPC and diff; idempotent settlement skips already-settled state, so two honest exporters converge | Forensic, not automatic; follow the evidence requirements in `docs/PILOT_PLAYBOOK.md` |
 
 ## Trust assumptions

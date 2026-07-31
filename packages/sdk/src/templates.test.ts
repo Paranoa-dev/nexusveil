@@ -25,6 +25,7 @@ describe("Core v2 partner templates", () => {
       paymentAsset: "CPAYMENT",
       lotAsset: "CLOT",
       lotAmount: 1n,
+      fixedEscrow: 1_000n,
     });
 
     assert.equal(round.mode, "Auction");
@@ -32,6 +33,7 @@ describe("Core v2 partner templates", () => {
     assert.equal(round.paymentAsset, "CPAYMENT");
     assert.equal(round.lotAsset, "CLOT");
     assert.equal(round.lotAmount, 1n);
+    assert.equal(round.fixedEscrow, 1_000n);
     assert.deepEqual(round.schemaRef, ASSET_AUCTION_SCHEMA_REF);
     assert.equal(round.schemaRef.length, 32);
   });
@@ -44,6 +46,7 @@ describe("Core v2 partner templates", () => {
     assert.equal(round.paymentAsset, undefined);
     assert.equal(round.lotAsset, undefined);
     assert.equal(round.lotAmount, undefined);
+    assert.equal(round.fixedEscrow, 0n);
     assert.deepEqual(round.schemaRef, SEALED_PROPOSAL_SCHEMA_REF);
     assert.equal(round.schemaRef.length, 32);
   });

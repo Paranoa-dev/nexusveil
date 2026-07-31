@@ -1,12 +1,43 @@
 # Round Receipts
 
-A **round receipt** is a portable JSON document that captures the final state of a Sub Rosa auction round. Receipts can be exported from any live contract and verified offline — no RPC, no secrets, no Stellar dependency.
+A **round receipt** is a portable JSON document that captures the final state of a Sub Rosa round. Receipts can be exported from any live contract and verified offline - no RPC, no secrets, no Stellar dependency.
+
+## Core v2 receipt
+
+New partner integrations use `exportReceiptV2`, `serializeReceiptV2`, and
+`verifyReceiptV2`. The version-2 receipt binds the complete canonical payload
+envelope and includes `schemaRef`, mode, settlement assets, Drand configuration,
+participant cap, and partner policy.
+
+The `policy` object records:
+
+- `enforced`: whether the round was created through the partner-policy path;
+- `fixedEscrow`: the identical Auction escrow, or zero for ReceiptOnly;
+- `participation`: `Open` or `Allowlist`;
+- `eligibleParticipants`: the public on-chain allowlist when configured.
+
+The offline verifier recomputes each full-envelope commitment, checks the
+revealed amount, fixed escrow, allowlist membership, settlement flags, and
+deterministic winner. Legacy Core v2 rounds remain exportable with
+`policy.enforced: false` and produce a warning rather than inventing policy
+enforcement that did not exist on-chain.
+
+```ts
+const receipt = await client.exportReceiptV2(roundId);
+const result = verifyReceiptV2(receipt);
+const json = serializeReceiptV2(receipt);
+```
+
+The hosted pilot exposes the same verified canonical JSON download after a
+round reaches `Settled` or `Voided`.
+
+## Legacy v1 receipt
 
 ## Schema
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `version` | `number` | Receipt schema version (currently `1`) |
+| `version` | `number` | Legacy receipt schema version (`1`) |
 | `network` | `string` | Stellar network passphrase (e.g. `"Test SDF Network ; September 2015"`) |
 | `networkFingerprint` | `string` (64 hex chars) | `sha256(utf8(network))` — lets the offline verifier detect a tampered `network` field without any caller context |
 | `contractId` | `string` | Contract address (starts with `C`) |

@@ -236,6 +236,7 @@ describe("SubRosaClient preflight helpers", () => {
       "preflightSettle",
       "preflightVoid",
       "preflightCreateRoundV2",
+      "preflightCreatePartnerRoundV2",
       "preflightCommitV2",
       "preflightOpenRevealV2",
       "preflightRevealV2",

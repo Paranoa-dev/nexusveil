@@ -44,8 +44,7 @@ Copy from `apps/web/.env.example`:
 ```bash
 VITE_RPC_URL=https://soroban-testnet.stellar.org
 VITE_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
-VITE_CONTRACT_ID=CAPTODBCDEVIK23ALBJBS2TXRTIK47ZA5MBTHYF4XLHG2BK7JPYUCU2Y
-VITE_ROUND_ID=1
+VITE_CONTRACT_ID=CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV
 ```
 
 **Mainnet example** (live poll against mainnet smoke):

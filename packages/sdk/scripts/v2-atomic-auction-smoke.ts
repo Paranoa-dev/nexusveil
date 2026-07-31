@@ -22,11 +22,12 @@ import {
   createAssetAuctionRound,
   sealAssetBid,
   SubRosaClient,
+  verifyReceiptV2,
 } from "../src/index.js";
 
 const RPC_URL = "https://soroban-testnet.stellar.org";
 const NETWORK = Networks.TESTNET;
-const CONTRACT_ID = "CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P";
+const DEFAULT_CONTRACT_ID = "CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV";
 const PAYMENT_CODE = "SRUSD";
 const LOT_CODE = "SRLOT";
 const UNIT = 10_000_000n;
@@ -56,6 +57,7 @@ async function clearAfterLedgerCatchup(client: SubRosaClient, roundId: bigint) {
 }
 
 async function main() {
+  const contractId = process.env.ROUND_CONTRACT_ID ?? DEFAULT_CONTRACT_ID;
   const issuer = Keypair.fromSecret(required("ISSUER_SECRET"));
   const seller = Keypair.fromSecret(required("OPERATOR_SECRET"));
   const bidder = Keypair.fromSecret(required("BIDDER_SECRET"));
@@ -161,13 +163,13 @@ async function main() {
   const sellerClient = new SubRosaClient({
     rpcUrl: RPC_URL,
     networkPassphrase: NETWORK,
-    contractId: CONTRACT_ID,
+    contractId,
     secretKey: seller.secret(),
   });
   const bidderClient = new SubRosaClient({
     rpcUrl: RPC_URL,
     networkPassphrase: NETWORK,
-    contractId: CONTRACT_ID,
+    contractId,
     secretKey: bidder.secret(),
   });
   const drand = quicknet();
@@ -182,11 +184,13 @@ async function main() {
     paymentAsset: paymentSac,
     lotAsset: lotSac,
     lotAmount: UNIT,
+    fixedEscrow: 25n * UNIT,
     revealRound,
     commitDeadline: now + 15,
     revealDeadline,
     auditorPubkey: auditor.publicKey,
     maxParticipants: 5,
+    eligibleParticipants: [bidder.publicKey()],
   });
   console.log(`created auction round ${roundId}; 1 SRLOT moved into contract custody`);
 
@@ -218,8 +222,9 @@ async function main() {
   await clearAfterLedgerCatchup(sellerClient, roundId);
   await sellerClient.settleV2(roundId);
 
-  const [round, submission] = await Promise.all([
+  const [round, policy, submission] = await Promise.all([
     sellerClient.getRoundV2(roundId),
+    sellerClient.getRoundPolicyV2(roundId),
     sellerClient.getSubmissionV2(roundId, bidder.publicKey()),
   ]);
   const balancesAfter = {
@@ -239,6 +244,18 @@ async function main() {
     throw new Error("atomic auction did not reach the expected settled state");
   }
   if (
+    !policy ||
+    policy.fixed_escrow !== escrow ||
+    policy.eligible_participants[0] !== bidder.publicKey()
+  ) {
+    throw new Error("auction partner policy did not persist fixed escrow and eligibility");
+  }
+  const receipt = await sellerClient.exportReceiptV2(roundId);
+  const verification = verifyReceiptV2(receipt);
+  if (!verification.valid) {
+    throw new Error(`auction receipt verification failed: ${JSON.stringify(verification.issues)}`);
+  }
+  if (
     balancesAfter.sellerPayment - balancesBefore.sellerPayment !== 20 ||
     balancesAfter.sellerLot - balancesBefore.sellerLot !== -1 ||
     balancesAfter.bidderPayment - balancesBefore.bidderPayment !== -20 ||
@@ -250,7 +267,7 @@ async function main() {
   console.log("LIVE CORE V2 ATOMIC AUCTION PASSED");
   console.log(
     JSON.stringify({
-      contractId: CONTRACT_ID,
+      contractId,
       roundId: roundId.toString(),
       mode: round.mode.tag,
       status: round.status.tag,
@@ -259,6 +276,8 @@ async function main() {
       paymentAsset: paymentSac,
       lotAsset: lotSac,
       lotAmount: round.lot_amount.toString(),
+      policy: receipt.policy,
+      receiptVerified: true,
       balanceDeltas: {
         sellerPayment: 20,
         sellerLot: -1,

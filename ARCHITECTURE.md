@@ -133,7 +133,7 @@ are checked against contract WASM in CI.
 
 | Network | Artifact | Meaning |
 | --- | --- | --- |
-| Testnet | Core v2 contract `CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P` | ReceiptOnly round 4 and atomic Auction round 5 settled |
+| Testnet | Core v2 contract `CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV` | Policy-enforced ReceiptOnly round 2 and atomic Auction round 3 settled |
 | Mainnet | Legacy v1 contract `CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX` | Real XLM settlement proof only |
 
 Core v2 requires independent funds-handling review before production mainnet

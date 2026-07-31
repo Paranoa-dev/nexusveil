@@ -6,7 +6,7 @@ import type {
 } from "@sub-rosa/tlock";
 
 import type {
-  CreateRoundV2Params,
+  CreatePartnerRoundV2Params,
   SubRosaClient,
 } from "./client.js";
 
@@ -20,19 +20,22 @@ export const SEALED_PROPOSAL_SCHEMA_REF = fromHex(
 );
 
 type SharedRoundParams = Omit<
-  CreateRoundV2Params,
+  CreatePartnerRoundV2Params,
   | "mode"
   | "schemaRef"
   | "paymentAsset"
   | "lotAsset"
   | "lotAmount"
   | "clearingRule"
+  | "fixedEscrow"
 >;
 
 export interface AssetAuctionRoundParams extends SharedRoundParams {
   paymentAsset: string;
   lotAsset: string;
   lotAmount: bigint;
+  /** Same public escrow cap enforced for every bidder, preventing bid-size leakage. */
+  fixedEscrow: bigint;
   schemaRef?: Uint8Array;
 }
 
@@ -42,23 +45,25 @@ export interface SealedProposalRoundParams extends SharedRoundParams {
 
 export function assetAuctionRound(
   params: AssetAuctionRoundParams,
-): CreateRoundV2Params {
+): CreatePartnerRoundV2Params {
   return {
     ...params,
     schemaRef: params.schemaRef ?? ASSET_AUCTION_SCHEMA_REF,
     mode: "Auction",
     clearingRule: "HighestBid",
+    fixedEscrow: params.fixedEscrow,
   };
 }
 
 export function sealedProposalRound(
   params: SealedProposalRoundParams,
-): CreateRoundV2Params {
+): CreatePartnerRoundV2Params {
   return {
     ...params,
     schemaRef: params.schemaRef ?? SEALED_PROPOSAL_SCHEMA_REF,
     mode: "ReceiptOnly",
     clearingRule: "LowestBid",
+    fixedEscrow: 0n,
   };
 }
 
@@ -66,14 +71,14 @@ export function createAssetAuctionRound(
   client: SubRosaClient,
   params: AssetAuctionRoundParams,
 ): Promise<bigint> {
-  return client.createRoundV2(assetAuctionRound(params));
+  return client.createPartnerRoundV2(assetAuctionRound(params));
 }
 
 export function createSealedProposalRound(
   client: SubRosaClient,
   params: SealedProposalRoundParams,
 ): Promise<bigint> {
-  return client.createRoundV2(sealedProposalRound(params));
+  return client.createPartnerRoundV2(sealedProposalRound(params));
 }
 
 interface SharedSealParams {

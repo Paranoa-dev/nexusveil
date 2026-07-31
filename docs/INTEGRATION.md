@@ -48,6 +48,7 @@ const roundId = await createAssetAuctionRound(client, {
   paymentAsset: usdcSac,
   lotAsset: collectibleSac,
   lotAmount: 1n,
+  fixedEscrow: 1_000n,
   revealRound,
   commitDeadline,
   revealDeadline,
@@ -63,8 +64,8 @@ const sealed = await sealAssetBid({
 await client.submitV2({ roundId, sealed, escrow: 1_000n });
 ```
 
-The seller authorizes lot custody at round creation. Bidders authorize their
-escrow caps when submitting. Settlement transfers the winning amount to the
+The seller authorizes lot custody at round creation. Every bidder authorizes the
+same contract-enforced `fixedEscrow` when submitting. Settlement transfers the winning amount to the
 seller, returns the winner's unused escrow, refunds losers, and transfers the
 lot to the winner.
 
@@ -85,6 +86,7 @@ const roundId = await createSealedProposalRound(client, {
   commitDeadline,
   revealDeadline,
   auditorPubkey,
+  eligibleParticipants: [providerA, providerB], // optional; omit for open access
 });
 
 const sealed = await sealProposal({
@@ -124,6 +126,11 @@ if (!result.ok) {
 await client.submitV2({ roundId, sealed, escrow });
 ```
 
+Use `preflightCreatePartnerRoundV2` for partner-round creation. The lower-level
+`createRoundV2` remains available only for compatibility with earlier Core v2
+integrations; new integrations should use the templates or
+`createPartnerRoundV2` directly.
+
 Preflight results expose transaction fee estimates, Soroban resources, typed
 RPC failures, and decoded contract errors where available.
 
@@ -142,7 +149,8 @@ Production pilots should still run a keeper for predictable liveness:
 pnpm keeper:watch
 ```
 
-The keeper opens reveal, submits valid payloads, clears the round, settles or
+The keeper opens reveal, submits each valid payload with retry-safe per-bidder
+calls, clears the round, settles or
 completes it, and exposes health/status data. It cannot decrypt payloads before
 Drand publishes `R` and does not need participant secret keys.
 

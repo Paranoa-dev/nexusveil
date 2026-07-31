@@ -14,7 +14,7 @@ configured reviewed mode deterministically.
 
 | Mode | Escrow | Completion |
 | --- | --- | --- |
-| `Auction` | Payment caps from bidders and lot custody from seller | Highest valid bid pays seller; lot moves to winner; remaining escrow is refunded |
+| `Auction` | One contract-enforced fixed escrow from every bidder and lot custody from seller | Highest valid bid pays seller; lot moves to winner; remaining escrow is refunded |
 | `ReceiptOnly` | Forbidden | Revealed submission set and canonical completion receipt |
 
 ## Payload envelope
@@ -31,6 +31,15 @@ domain-separated envelope includes:
 The contract rejects unsupported versions, malformed payloads, and oversized
 application data. SDK templates own schema-specific encoding so partner
 applications do not construct envelope bytes manually.
+
+## Partner policy
+
+`create_partner_round_v2` stores a policy separately from the durable `RoundV2`
+record, preserving compatibility with earlier rounds. An empty participant list
+means open access; a non-empty list is an on-chain allowlist. Auction policy
+requires a positive `fixed_escrow`, and `commit_v2` rejects any different
+amount. Receipt-only policy requires zero escrow. The allowlist and protocol cap
+bound a round to at most 25 participants.
 
 ## Cryptography
 
@@ -86,6 +95,11 @@ After the relevant deadlines and Drand round, any account may invoke lifecycle
 operations. A keeper provides operational liveness without receiving special
 decryption or settlement authority.
 
+Opening reveal is one transaction, while decrypted envelopes are persisted in
+bounded, retry-safe per-participant transactions. This avoids an unbounded
+all-reveal transaction and prevents one malformed ciphertext from forcing the
+whole cohort to fail. It does not claim atomic reveal of all ciphertexts.
+
 ## SDK and bindings
 
 | Package | Role |
@@ -106,9 +120,9 @@ delivery and fee sponsorship, not contract authorization or settlement rules.
 ## Verified deployments
 
 - Core v2 testnet contract:
-  `CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P`
+  `CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV`
 - Core v2 testnet WASM:
-  `c6eb47b06b95f612361596944ce39f0545d3b11d93678952cef67dec09cce91e`
+  `2c7bc6b4c91940ac185df38a3d0a8532b555140d818df94f03f894e5952ebf42`
 - Legacy v1 mainnet settlement proof:
   `CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX`
 

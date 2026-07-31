@@ -17,7 +17,7 @@ contract.
 Open a round before Drand `R` and show:
 
 - public item reference and deadlines;
-- participant count and public escrow caps where applicable;
+- participant count, open/allowlist policy, and shared fixed escrow where applicable;
 - ciphertext instead of readable bid/proposal content;
 - public status without requiring a wallet.
 
@@ -44,7 +44,7 @@ make clear that partner selection remains off-chain.
 ## 5. Show the receipt
 
 Display the contract ID, round ID, network, schema, participant count, final
-status, revealed payloads, winner when applicable, and settlement indicators.
+status, policy, revealed payloads, winner when applicable, and settlement indicators.
 Mention that SDK receipt verification is offline and should be combined with a
 direct ledger query for high-value use.
 

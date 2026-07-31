@@ -1,7 +1,8 @@
 use soroban_sdk::{Address, Env, Vec};
 
 use crate::types::{
-    BidState, DataKey, Error, GlobalConfig, Round, RoundV2, Seal, SubmissionStateV2,
+    BidState, DataKey, Error, GlobalConfig, Round, RoundPolicyV2, RoundV2, Seal,
+    SubmissionStateV2,
 };
 
 // TTL policy. Ledger close time on Stellar is ~5s, so these are generous for a
@@ -100,6 +101,23 @@ pub fn get_round_v2(env: &Env, round_id: u64) -> Result<RoundV2, Error> {
 pub fn set_round_v2(env: &Env, round_id: u64, round: &RoundV2) {
     let key = DataKey::RoundV2(round_id);
     env.storage().persistent().set(&key, round);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_THRESHOLD, PERSISTENT_BUMP);
+}
+
+pub fn get_round_policy_v2(env: &Env, round_id: u64) -> Option<RoundPolicyV2> {
+    let key = DataKey::PolicyV2(round_id);
+    let policy = env.storage().persistent().get(&key)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_THRESHOLD, PERSISTENT_BUMP);
+    Some(policy)
+}
+
+pub fn set_round_policy_v2(env: &Env, round_id: u64, policy: &RoundPolicyV2) {
+    let key = DataKey::PolicyV2(round_id);
+    env.storage().persistent().set(&key, policy);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_THRESHOLD, PERSISTENT_BUMP);

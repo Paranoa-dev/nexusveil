@@ -2,11 +2,13 @@
 
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    Address, Bytes, Env, IntoVal, Symbol,
+    Address, Bytes, Env, IntoVal, Symbol, Vec,
 };
 
 use crate::storage::{get_round, get_round_v2, set_round, set_round_v2};
-use crate::types::{ClearingRule, DataKey, Error, RoundMode, SettlementConfig, Status};
+use crate::types::{
+    ClearingRule, DataKey, Error, RoundMode, RoundPolicyV2, SettlementConfig, Status,
+};
 
 use super::{
     assert_try_create_round_err, assert_try_contract_err, b32, commit_bid, commitment,
@@ -49,7 +51,38 @@ const ERROR_PATH_REGISTRY: &[(Error, &'static str)] = &[
     (Error::MalformedPayload, "error_path_malformed_payload"),
     (Error::EscrowNotAllowed, "error_path_escrow_not_allowed"),
     (Error::RoundDurationTooLong, "error_path_round_duration_too_long"),
+    (Error::ParticipantNotEligible, "error_path_participant_not_eligible"),
+    (Error::EscrowPolicyMismatch, "error_path_escrow_policy_mismatch"),
 ];
+
+fn partner_policy_round(f: &Fixture, eligible: &Address, fixed_escrow: i128) -> u64 {
+    let operator = Address::generate(&f.env);
+    let lot_issuer = Address::generate(&f.env);
+    let lot_sac = f.env.register_stellar_asset_contract_v2(lot_issuer);
+    let lot_asset = lot_sac.address();
+    soroban_sdk::token::StellarAssetClient::new(&f.env, &lot_asset).mint(&operator, &1);
+    f.client.create_partner_round_v2(
+        &operator,
+        &b32(&f.env, 1),
+        &b32(&f.env, 2),
+        &RoundPolicyV2 {
+            settlement: SettlementConfig {
+                mode: RoundMode::Auction,
+                payment_asset: Some(f.usdc_token.address.clone()),
+                lot_asset: Some(lot_asset),
+                lot_amount: 1,
+            },
+            fixed_escrow,
+            eligible_participants: Vec::from_array(&f.env, [eligible.clone()]),
+        },
+        &VEC_ROUND,
+        &ClearingRule::HighestBid,
+        &(crate::test::VEC_GENESIS + crate::test::VEC_PERIOD * VEC_ROUND - 100),
+        &(crate::test::VEC_GENESIS + crate::test::VEC_PERIOD * VEC_ROUND + 200),
+        &Bytes::new(&f.env),
+        &5,
+    )
+}
 
 fn oversized_bytes(env: &Env, len: u32) -> Bytes {
     let mut buf = [0u8; 1025];
@@ -91,7 +124,7 @@ fn settle_happy_path(f: &Fixture, t_reveal: u64, commit_deadline: u64, reveal_de
 fn error_paths_registry_covers_every_variant() {
     assert_eq!(
         ERROR_PATH_REGISTRY.len(),
-        31,
+        33,
         "update ERROR_PATH_REGISTRY when adding/removing Error variants"
     );
     for (variant, name) in ERROR_PATH_REGISTRY {
@@ -653,5 +686,46 @@ fn error_path_round_duration_too_long() {
             &1,
         ),
         Error::RoundDurationTooLong,
+    );
+}
+
+#[test]
+fn error_path_participant_not_eligible() {
+    let (f, _, _, _) = setup_drand();
+    let allowed = funded_bidder(&f, 1_000);
+    let blocked = funded_bidder(&f, 1_000);
+    let id = partner_policy_round(&f, &allowed, 1_000);
+    let envelope = payload_envelope(&f.env, Some(700), b"bid", 0x71);
+    let commitment = f.env.crypto().sha256(&envelope).to_bytes();
+    assert_try_contract_err(
+        f.client.try_commit_v2(
+            &id,
+            &blocked,
+            &commitment,
+            &Bytes::from_array(&f.env, b"sealed"),
+            &1_000,
+            &Bytes::new(&f.env),
+        ),
+        Error::ParticipantNotEligible,
+    );
+}
+
+#[test]
+fn error_path_escrow_policy_mismatch() {
+    let (f, _, _, _) = setup_drand();
+    let allowed = funded_bidder(&f, 1_000);
+    let id = partner_policy_round(&f, &allowed, 1_000);
+    let envelope = payload_envelope(&f.env, Some(700), b"bid", 0x72);
+    let commitment = f.env.crypto().sha256(&envelope).to_bytes();
+    assert_try_contract_err(
+        f.client.try_commit_v2(
+            &id,
+            &allowed,
+            &commitment,
+            &Bytes::from_array(&f.env, b"sealed"),
+            &999,
+            &Bytes::new(&f.env),
+        ),
+        Error::EscrowPolicyMismatch,
     );
 }

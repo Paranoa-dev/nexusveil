@@ -26,7 +26,7 @@ stay in sync with `contracts/round/src/types.rs`.
 | --- | --- |
 | 1–4     | Initialization & state lookup |
 | 10–22   | Lifecycle & timing |
-| 30–43   | Cryptography & validation |
+| 30–45   | Cryptography, payload & partner policy validation |
 
 ## Initialization & state lookup (1–4)
 
@@ -73,6 +73,8 @@ stay in sync with `contracts/round/src/types.rs`.
 | 41 | `MalformedPayload` | `reveal_v2` | Envelope magic, flags, reserved bytes, declared length, canonical zero fields, or required auction amount is invalid. | The revealed structured payload is malformed or non-canonical. | Re-open the original ciphertext with `@sub-rosa/tlock` and submit the exact canonical envelope bytes. |
 | 42 | `EscrowNotAllowed` | `create_round_v2`, `commit_v2`, `reveal_v2` | A `ReceiptOnly` round configured payment/lot settlement or received non-zero escrow. | Receipt-only rounds do not accept or move assets. | Omit settlement assets and submit with `escrow = 0`, or create an `Auction` round when atomic settlement is required. |
 | 43 | `RoundDurationTooLong` | `create_round_v2` | `reveal_deadline - now` exceeds the supported 30-day Core v2 duration. | The requested round duration exceeds the supported storage and liveness window. | Choose deadlines within 30 days of the creation ledger timestamp. |
+| 44 | `ParticipantNotEligible` | `commit_v2` | The round has a non-empty participant allowlist and the bidder is not included. | This address is not eligible for the round. | Connect an allowlisted wallet or ask the organizer to create a new round with the correct participant list. |
+| 45 | `EscrowPolicyMismatch` | `commit_v2` | An auction created with a partner policy received an escrow amount different from the round's fixed public cap. | Every bidder must lock the same escrow cap for this auction. | Read `get_round_policy_v2` and submit exactly its `fixed_escrow` amount. |
 
 ## How to use this table
 

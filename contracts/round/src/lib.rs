@@ -42,6 +42,130 @@ const CORE_V2_VERSION: u32 = 2;
 #[contract]
 pub struct SubRosaRound;
 
+#[allow(clippy::too_many_arguments)]
+fn create_round_v2_impl(
+    env: &Env,
+    operator: Address,
+    item_ref: BytesN<32>,
+    schema_ref: BytesN<32>,
+    settlement: SettlementConfig,
+    reveal_round: u64,
+    clearing_rule: ClearingRule,
+    commit_deadline: u64,
+    reveal_deadline: u64,
+    auditor_pubkey: Bytes,
+    max_participants: u32,
+    policy: Option<RoundPolicyV2>,
+) -> Result<u64, Error> {
+    operator.require_auth();
+    let SettlementConfig {
+        mode,
+        payment_asset,
+        lot_asset,
+        lot_amount,
+    } = settlement;
+    let config = get_config(env)?;
+    bump_instance(env);
+
+    if reveal_round == 0 {
+        return Err(Error::InvalidAmount);
+    }
+    if max_participants == 0 || max_participants > MAX_V2_PARTICIPANTS {
+        return Err(Error::InvalidLimit);
+    }
+    if auditor_pubkey.len() > MAX_AUDITOR_PUBKEY {
+        return Err(Error::PayloadTooLarge);
+    }
+
+    let now = env.ledger().timestamp();
+    let t_reveal = drand::time_of_round(&config, reveal_round);
+    if commit_deadline >= t_reveal || reveal_deadline <= t_reveal {
+        return Err(Error::CommitDeadlineAfterReveal);
+    }
+    if commit_deadline <= now {
+        return Err(Error::DeadlineInPast);
+    }
+    if reveal_deadline.saturating_sub(now) > MAX_ROUND_DURATION_SECS {
+        return Err(Error::RoundDurationTooLong);
+    }
+
+    match mode {
+        RoundMode::Auction => {
+            if payment_asset.is_none() || lot_asset.is_none() || lot_amount <= 0 {
+                return Err(Error::InvalidAmount);
+            }
+        }
+        RoundMode::ReceiptOnly => {
+            if payment_asset.is_some() || lot_asset.is_some() || lot_amount != 0 {
+                return Err(Error::EscrowNotAllowed);
+            }
+        }
+    }
+
+    if let Some(ref partner_policy) = policy {
+        match mode {
+            RoundMode::Auction if partner_policy.fixed_escrow <= 0 => {
+                return Err(Error::InvalidAmount);
+            }
+            RoundMode::ReceiptOnly if partner_policy.fixed_escrow != 0 => {
+                return Err(Error::EscrowNotAllowed);
+            }
+            _ => {}
+        }
+        if partner_policy.eligible_participants.len() > max_participants {
+            return Err(Error::InvalidLimit);
+        }
+        for left in 0..partner_policy.eligible_participants.len() {
+            for right in (left + 1)..partner_policy.eligible_participants.len() {
+                if partner_policy.eligible_participants.get(left)
+                    == partner_policy.eligible_participants.get(right)
+                {
+                    return Err(Error::InvalidLimit);
+                }
+            }
+        }
+    }
+
+    if let Some(asset) = lot_asset.clone() {
+        token::Client::new(env, &asset).transfer(
+            &operator,
+            &env.current_contract_address(),
+            &lot_amount,
+        );
+    }
+
+    let round_id = next_round_id(env);
+    let round = RoundV2 {
+        protocol_version: CORE_V2_VERSION,
+        schema_ref,
+        mode,
+        operator: operator.clone(),
+        item_ref,
+        payment_asset,
+        lot_asset,
+        lot_amount,
+        reveal_round,
+        clearing_rule,
+        commit_deadline,
+        reveal_deadline,
+        auditor_pubkey,
+        max_participants,
+        status: Status::Open,
+        bidders: Vec::new(env),
+        winner: None,
+        winning_bid: 0,
+    };
+    set_round_v2(env, round_id, &round);
+    if let Some(partner_policy) = policy {
+        set_round_policy_v2(env, round_id, &partner_policy);
+    }
+    env.events().publish(
+        (symbol_short!("createdv2"), round_id),
+        (operator, mode, reveal_round, commit_deadline),
+    );
+    Ok(round_id)
+}
+
 #[contractimpl]
 impl SubRosaRound {
     /// One-time deploy configuration. All Drand parameters are supplied by the
@@ -483,87 +607,52 @@ impl SubRosaRound {
         auditor_pubkey: Bytes,
         max_participants: u32,
     ) -> Result<u64, Error> {
-        operator.require_auth();
-        let SettlementConfig {
-            mode,
-            payment_asset,
-            lot_asset,
-            lot_amount,
-        } = settlement;
-        let config = get_config(&env)?;
-        bump_instance(&env);
-
-        if reveal_round == 0 {
-            return Err(Error::InvalidAmount);
-        }
-        if max_participants == 0 || max_participants > MAX_V2_PARTICIPANTS {
-            return Err(Error::InvalidLimit);
-        }
-        if auditor_pubkey.len() > MAX_AUDITOR_PUBKEY {
-            return Err(Error::PayloadTooLarge);
-        }
-
-        let now = env.ledger().timestamp();
-        let t_reveal = drand::time_of_round(&config, reveal_round);
-        if commit_deadline >= t_reveal || reveal_deadline <= t_reveal {
-            return Err(Error::CommitDeadlineAfterReveal);
-        }
-        if commit_deadline <= now {
-            return Err(Error::DeadlineInPast);
-        }
-        if reveal_deadline.saturating_sub(now) > MAX_ROUND_DURATION_SECS {
-            return Err(Error::RoundDurationTooLong);
-        }
-
-        match mode {
-            RoundMode::Auction => {
-                if payment_asset.is_none() || lot_asset.is_none() || lot_amount <= 0 {
-                    return Err(Error::InvalidAmount);
-                }
-            }
-            RoundMode::ReceiptOnly => {
-                if payment_asset.is_some() || lot_asset.is_some() || lot_amount != 0 {
-                    return Err(Error::EscrowNotAllowed);
-                }
-            }
-        }
-
-        if let Some(asset) = lot_asset.clone() {
-            let lot = token::Client::new(&env, &asset);
-            lot.transfer(
-                &operator,
-                &env.current_contract_address(),
-                &lot_amount,
-            );
-        }
-
-        let round_id = next_round_id(&env);
-        let round = RoundV2 {
-            protocol_version: CORE_V2_VERSION,
-            schema_ref,
-            mode,
-            operator: operator.clone(),
+        create_round_v2_impl(
+            &env,
+            operator,
             item_ref,
-            payment_asset,
-            lot_asset,
-            lot_amount,
+            schema_ref,
+            settlement,
             reveal_round,
             clearing_rule,
             commit_deadline,
             reveal_deadline,
             auditor_pubkey,
             max_participants,
-            status: Status::Open,
-            bidders: Vec::new(&env),
-            winner: None,
-            winning_bid: 0,
-        };
-        set_round_v2(&env, round_id, &round);
-        env.events().publish(
-            (symbol_short!("createdv2"), round_id),
-            (operator, mode, reveal_round, commit_deadline),
-        );
-        Ok(round_id)
+            None,
+        )
+    }
+
+    /// Create a partner round with a contract-enforced fixed auction escrow
+    /// and optional participant allowlist. Existing Core v2 rounds remain valid.
+    pub fn create_partner_round_v2(
+        env: Env,
+        operator: Address,
+        item_ref: BytesN<32>,
+        schema_ref: BytesN<32>,
+        policy: RoundPolicyV2,
+        reveal_round: u64,
+        clearing_rule: ClearingRule,
+        commit_deadline: u64,
+        reveal_deadline: u64,
+        auditor_pubkey: Bytes,
+        max_participants: u32,
+    ) -> Result<u64, Error> {
+        let settlement = policy.settlement.clone();
+        create_round_v2_impl(
+            &env,
+            operator,
+            item_ref,
+            schema_ref,
+            settlement,
+            reveal_round,
+            clearing_rule,
+            commit_deadline,
+            reveal_deadline,
+            auditor_pubkey,
+            max_participants,
+            Some(policy),
+        )
     }
 
     /// Commit a full structured payload hash. Auction rounds require escrow;
@@ -599,6 +688,21 @@ impl SubRosaRound {
             RoundMode::Auction if escrow <= 0 => return Err(Error::InvalidAmount),
             RoundMode::ReceiptOnly if escrow != 0 => return Err(Error::EscrowNotAllowed),
             _ => {}
+        }
+        if let Some(policy) = get_round_policy_v2(&env, round_id) {
+            let mut eligible = policy.eligible_participants.is_empty();
+            for allowed in policy.eligible_participants.iter() {
+                if allowed == bidder {
+                    eligible = true;
+                    break;
+                }
+            }
+            if !eligible {
+                return Err(Error::ParticipantNotEligible);
+            }
+            if round.mode == RoundMode::Auction && escrow != policy.fixed_escrow {
+                return Err(Error::EscrowPolicyMismatch);
+            }
         }
         if ciphertext.len() > MAX_CIPHERTEXT || auditor_blob.len() > MAX_AUDITOR_BLOB {
             return Err(Error::PayloadTooLarge);
@@ -917,6 +1021,10 @@ impl SubRosaRound {
 
     pub fn get_round_v2(env: Env, round_id: u64) -> Result<RoundV2, Error> {
         storage::get_round_v2(&env, round_id)
+    }
+
+    pub fn get_round_policy_v2(env: Env, round_id: u64) -> Option<RoundPolicyV2> {
+        storage::get_round_policy_v2(&env, round_id)
     }
 
     pub fn get_submission_v2(

@@ -243,6 +243,40 @@ describe("SubRosaClient source configuration", () => {
       /cannot configure payment or lot settlement/,
     );
   });
+
+  it("validates partner fixed escrow and eligibility before RPC", async () => {
+    const client = new SubRosaClient({ ...BASE_CONFIG, publicKey: PUBLIC_KEY });
+    const shared = {
+      itemRef: new Uint8Array(32),
+      schemaRef: new Uint8Array(32),
+      revealRound: 1,
+      commitDeadline: 2,
+      revealDeadline: 3,
+      auditorPubkey: new Uint8Array(96),
+      operator: PUBLIC_KEY,
+    };
+
+    await assert.rejects(
+      client.createPartnerRoundV2({
+        ...shared,
+        mode: "Auction",
+        paymentAsset: PUBLIC_KEY,
+        lotAsset: PUBLIC_KEY,
+        lotAmount: 1n,
+        fixedEscrow: 0n,
+      }),
+      /positive fixedEscrow/,
+    );
+    await assert.rejects(
+      client.createPartnerRoundV2({
+        ...shared,
+        mode: "ReceiptOnly",
+        fixedEscrow: 0n,
+        eligibleParticipants: [PUBLIC_KEY, PUBLIC_KEY],
+      }),
+      /cannot contain duplicates/,
+    );
+  });
 });
 
 describe("SubRosaClient external submitter failures", () => {

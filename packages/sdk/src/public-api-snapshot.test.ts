@@ -7,6 +7,7 @@ const EXPECTED_EXPORTS = [
   "ASSET_AUCTION_SCHEMA_ID",
   "ASSET_AUCTION_SCHEMA_REF",
   "AssetConfigError",
+  "CORE_V2_RECEIPT_VERSION",
   "KeeperStatusClient",
   "MAINNET_ARTIFACTS",
   "MAINNET_CONFIRM_PHRASE",
@@ -53,9 +54,11 @@ const EXPECTED_EXPORTS = [
   "normalizeRoundId",
   "normalizeSorobanContractId",
   "parseReceipt",
+  "parseReceiptV2",
   "redactReceipt",
   "runMainnetReadiness",
   "serializeReceipt",
+  "serializeReceiptV2",
   "sealAssetBid",
   "sealProposal",
   "sealedProposalRound",
@@ -66,6 +69,7 @@ const EXPECTED_EXPORTS = [
   "validateEncryptedBlob",
   "validateContractNetwork",
   "verifyReceipt",
+  "verifyReceiptV2",
   "verifySettledRoundProof",
 ];
 

@@ -8,9 +8,12 @@ import {
 import {
   ASSET_AUCTION_SCHEMA_REF,
   SEALED_PROPOSAL_SCHEMA_REF,
+  serializeReceiptV2,
   sealAssetBid,
   sealProposal,
   type RoundV2,
+  type RoundPolicyV2,
+  verifyReceiptV2,
 } from "@sub-rosa/sdk";
 import {
   fetchRoundSignature,
@@ -29,6 +32,7 @@ import {
   resolveFreighterAddress,
   sha256Bytes,
   useReadOnlyContract,
+  useReadOnlySdk,
   useWalletContract,
 } from "../lib/chain";
 import { LOGO_SRC } from "../lib/chain";
@@ -71,15 +75,18 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
   const [lotAmount, setLotAmount] = useState("1");
   const [roundId, setRoundId] = useState(pilotRoundIdFromHash);
   const [round, setRound] = useState<RoundV2 | null>(null);
+  const [roundPolicy, setRoundPolicy] = useState<RoundPolicyV2 | null>(null);
   const [revealedSubmissions, setRevealedSubmissions] = useState<PilotSubmissionView[]>([]);
   const [price, setPrice] = useState("25000000000");
   const [escrow, setEscrow] = useState("25000000000");
+  const [eligibleParticipants, setEligibleParticipants] = useState("");
   const [timelineDays, setTimelineDays] = useState("14");
   const [approach, setApproach] = useState("Manual review, fuzzing, and remediation report");
   const [busy, setBusy] = useState<string | null>(null);
   const refreshRequest = useRef(0);
   const contract = useWalletContract(address);
   const reader = useReadOnlyContract();
+  const sdk = useReadOnlySdk();
   const revealCountdown = useDrandCountdown(
     round ? Number(round.reveal_round) : 0,
   );
@@ -127,8 +134,13 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
   async function refresh(target = roundId) {
     if (!reader || !target) return;
     const request = ++refreshRequest.current;
-    const tx = await reader.get_round_v2({ round_id: BigInt(target) });
+    const rid = BigInt(target);
+    const [tx, policyTx] = await Promise.all([
+      reader.get_round_v2({ round_id: rid }),
+      reader.get_round_policy_v2({ round_id: rid }),
+    ]);
     const nextRound = tx.result.unwrap();
+    const nextPolicy = policyTx.result ?? null;
 
     const revealed = await Promise.all(
       nextRound.bidders.map(async (bidder) => {
@@ -147,6 +159,10 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
     if (request !== refreshRequest.current) return;
 
     setRound(nextRound);
+    setRoundPolicy(nextPolicy);
+    if (nextPolicy && nextRound.mode.tag === "Auction") {
+      setEscrow(nextPolicy.fixed_escrow.toString());
+    }
     setTemplate(nextRound.mode.tag === "Auction" ? "auction" : "proposal");
     setRevealedSubmissions(
       revealed.filter((entry): entry is PilotSubmissionView => entry !== null),
@@ -159,6 +175,7 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
       refreshRequest.current += 1;
       setRoundId(nextRoundId);
       setRound(null);
+      setRoundPolicy(null);
       setRevealedSubmissions([]);
       if (reader && nextRoundId) {
         void refresh(nextRoundId).catch((error) =>
@@ -195,17 +212,35 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
       const auditor = generateAuditorKeypair();
       const itemRef = await sha256Bytes(`${requestTitle}:${address}:${Date.now()}`);
       const isAuction = template === "auction";
-      const tx = await contract.create_round_v2({
+      const allowlist = eligibleParticipants
+        .split(/[\s,]+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      if (new Set(allowlist).size !== allowlist.length) {
+        throw new Error("Participant allowlist contains duplicate addresses");
+      }
+      if (allowlist.length > 25) {
+        throw new Error("Participant allowlist cannot exceed 25 addresses");
+      }
+      const fixedEscrow = isAuction ? BigInt(escrow) : 0n;
+      if (isAuction && fixedEscrow <= 0n) {
+        throw new Error("Fixed escrow must be positive for an asset auction");
+      }
+      const tx = await contract.create_partner_round_v2({
         operator: address,
         item_ref: Buffer.from(itemRef),
         schema_ref: Buffer.from(
           isAuction ? ASSET_AUCTION_SCHEMA_REF : SEALED_PROPOSAL_SCHEMA_REF,
         ),
-        settlement: {
-          mode: { tag: isAuction ? "Auction" : "ReceiptOnly", values: undefined },
-          payment_asset: isAuction ? paymentAsset.trim() : undefined,
-          lot_asset: isAuction ? lotAsset.trim() : undefined,
-          lot_amount: isAuction ? BigInt(lotAmount) : 0n,
+        policy: {
+          settlement: {
+            mode: { tag: isAuction ? "Auction" : "ReceiptOnly", values: undefined },
+            payment_asset: isAuction ? paymentAsset.trim() : undefined,
+            lot_asset: isAuction ? lotAsset.trim() : undefined,
+            lot_amount: isAuction ? BigInt(lotAmount) : 0n,
+          },
+          fixed_escrow: fixedEscrow,
+          eligible_participants: allowlist,
         },
         reveal_round: BigInt(revealRound),
         clearing_rule: {
@@ -272,7 +307,9 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
         bidder: address,
         commitment: Buffer.from(sealed.commitment),
         ciphertext: Buffer.from(sealed.ciphertext),
-        escrow: round.mode.tag === "Auction" ? BigInt(escrow) : 0n,
+        escrow: round.mode.tag === "Auction"
+          ? roundPolicy?.fixed_escrow ?? BigInt(escrow)
+          : 0n,
         auditor_blob: Buffer.from(sealed.auditorBlob),
       });
       await tx.signAndSend();
@@ -404,6 +441,37 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
     toast.push("success", "Pilot link copied", `Round #${roundId}`);
   }
 
+  async function downloadReceipt() {
+    if (!sdk || !roundId || !round) return;
+    setBusy("receipt");
+    try {
+      const receipt = await sdk.exportReceiptV2(BigInt(roundId));
+      const verification = verifyReceiptV2(receipt);
+      if (!verification.valid) {
+        throw new Error(
+          `Receipt verification failed: ${verification.issues
+            .filter((issue) => issue.severity === "error")
+            .map((issue) => issue.code)
+            .join(", ")}`,
+        );
+      }
+      const blob = new Blob([serializeReceiptV2(receipt)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `sub-rosa-round-${roundId}-v2-receipt.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.push("success", "Receipt verified", `Round #${roundId} downloaded`);
+    } catch (error) {
+      toast.push("error", "Receipt export failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <main className="pilot-page">
       <nav className="pilot-nav">
@@ -485,8 +553,21 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
                   Lot amount
                   <input inputMode="numeric" value={lotAmount} onChange={(event) => setLotAmount(event.target.value)} />
                 </label>
+                <label>
+                  Fixed escrow per bidder
+                  <input inputMode="numeric" value={escrow} onChange={(event) => setEscrow(event.target.value)} />
+                </label>
               </>
             )}
+            <label>
+              Eligible participants (optional)
+              <textarea
+                value={eligibleParticipants}
+                onChange={(event) => setEligibleParticipants(event.target.value)}
+                rows={3}
+                placeholder="One Stellar address per line"
+              />
+            </label>
             <button
               type="button"
               className="primary-action"
@@ -534,8 +615,13 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
             )}
             {submissionIsAuction && (
               <label>
-                Public escrow cap
-                <input inputMode="numeric" value={escrow} onChange={(event) => setEscrow(event.target.value)} />
+                Enforced escrow
+                <input
+                  inputMode="numeric"
+                  value={roundPolicy?.fixed_escrow.toString() ?? escrow}
+                  onChange={(event) => setEscrow(event.target.value)}
+                  readOnly={roundPolicy !== null}
+                />
               </label>
             )}
             <button
@@ -563,6 +649,10 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
               <dl className="pilot-facts">
                 <div><dt>Mode</dt><dd>{round.mode.tag}</dd></div>
                 <div><dt>Participants</dt><dd>{round.bidders.length} / {round.max_participants}</dd></div>
+                <div><dt>Eligibility</dt><dd>{roundPolicy?.eligible_participants.length ? `${roundPolicy.eligible_participants.length} allowlisted` : "Open"}</dd></div>
+                {round.mode.tag === "Auction" && (
+                  <div><dt>Fixed escrow</dt><dd>{roundPolicy?.fixed_escrow.toString() ?? "Legacy variable cap"}</dd></div>
+                )}
                 <div><dt>Drand round</dt><dd>{round.reveal_round.toString()}</dd></div>
                 <div><dt>Winner</dt><dd>{shortAddress(round.winner)}</dd></div>
                 <div><dt>Payment asset</dt><dd>{shortAddress(round.payment_asset)}</dd></div>
@@ -577,6 +667,16 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
               <div className="pilot-actions">
                 <button type="button" className="secondary-action compact" onClick={copyLink}>Copy link</button>
                 <button type="button" className="secondary-action compact" onClick={() => refresh()}>Refresh</button>
+                {(round.status.tag === "Settled" || round.status.tag === "Voided") && (
+                  <button
+                    type="button"
+                    className="secondary-action compact"
+                    onClick={downloadReceipt}
+                    disabled={!sdk || busy !== null}
+                  >
+                    {busy === "receipt" ? "Verifying..." : "Download receipt"}
+                  </button>
+                )}
                 {revealAction.visible && (
                   <button
                     type="button"
