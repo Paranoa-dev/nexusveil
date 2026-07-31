@@ -21,6 +21,7 @@
     "crypto-browserify": "^3.12.1",
     "events": "^3.3.0",
     "framer-motion": "^12.40.0",
+    "lucide-react": "^1.28.0",
     "passkey-kit": "^0.12.0",
     "process": "^0.11.10",
     "react": "^19.1.0",

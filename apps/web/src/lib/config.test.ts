@@ -24,8 +24,7 @@ test("valid config with optional keys missing returns no critical issues", () =>
   };
   const issues = validatePublicConfig(env);
 
-  const critical = issues.filter((i) => i.key !== "VITE_ESCROW_TOKEN_LABEL" && i.key !== "VITE_ROUND_ID");
-  assert.equal(critical.length, 0);
+  assert.equal(issues.length, 0);
 });
 
 test("missing critical keys are reported", () => {
@@ -60,15 +59,14 @@ test("empty string values are treated as missing", () => {
   assert.ok(issues.some((i) => i.key === "VITE_CONTRACT_ID"));
 });
 
-test("missing optional keys report a non-blocking message", () => {
+test("missing optional keys do not create public banner issues", () => {
   const env = {
     VITE_RPC_URL: "https://custom-rpc.example.com",
     VITE_NETWORK_PASSPHRASE: "Custom Network",
     VITE_CONTRACT_ID: "CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX",
   };
   const issues = validatePublicConfig(env);
-  assert.ok(issues.some((i) => i.key === "VITE_ESCROW_TOKEN_LABEL"));
-  assert.ok(issues.some((i) => i.key === "VITE_ROUND_ID"));
+  assert.equal(issues.length, 0);
 });
 
 test("placeholder default values are flagged", () => {
@@ -107,10 +105,16 @@ test("custom config with no optional keys still passes critical check", () => {
     VITE_CONTRACT_ID: "CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX",
   };
   const issues = validatePublicConfig(env);
-  const critical = issues.filter(
-    (i) => i.key !== "VITE_ESCROW_TOKEN_LABEL" && i.key !== "VITE_ROUND_ID",
-  );
-  assert.equal(critical.length, 0);
+  assert.equal(issues.length, 0);
+});
+
+test("official Stellar testnet public config is valid", () => {
+  const issues = validatePublicConfig({
+    VITE_RPC_URL: "https://soroban-testnet.stellar.org",
+    VITE_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
+    VITE_CONTRACT_ID: "CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV",
+  });
+  assert.equal(issues.length, 0);
 });
 
 
@@ -142,18 +146,15 @@ test("VITE_RPC_URL with trailing slash is not flagged as invalid", () => {
   assert.equal(urlIssues.length, 0);
 });
 
-test("VITE_RPC_URL with trailing slash is still flagged as placeholder default", () => {
+test("official VITE_RPC_URL with trailing slash is accepted", () => {
   const issues = validatePublicConfig({
     VITE_RPC_URL: "https://soroban-testnet.stellar.org/",
     VITE_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
     VITE_CONTRACT_ID: "CC2QMOXZERI6UOR67YKSORT7QTUHQ5QUGMHQBYVP23YM3NMUNNOEOGZY",
   });
-  assert.ok(
-    issues.some(
-      (i) =>
-        i.key === "VITE_RPC_URL" &&
-        i.message.includes("default/example value"),
-    ),
+  assert.equal(
+    issues.filter((i) => i.key === "VITE_RPC_URL").length,
+    0,
   );
 });
 

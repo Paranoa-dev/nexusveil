@@ -50,6 +50,7 @@ export function LandingPage({
           <a href="https://github.com/karagozemin/Sub-Rosa" target="_blank" rel="noreferrer">
             GitHub
           </a>
+          <a href="#/docs">Docs</a>
           <a href="#/dashboard" className="secondary-action compact">
             Dashboard
           </a>
@@ -97,6 +98,9 @@ export function LandingPage({
             </button>
             <a className="secondary-action" href="#/architecture">
               Read the architecture
+            </a>
+            <a className="secondary-action" href="#/docs">
+              Integration docs
             </a>
             <a className="secondary-action" href="#/pilot">
               Run a testnet pilot

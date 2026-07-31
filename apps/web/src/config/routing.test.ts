@@ -24,3 +24,11 @@ test("pilot round links accept only numeric round ids", () => {
 test("pilot navigation emits the canonical workspace hash", () => {
   assert.equal(hashFor("pilot"), "#/pilot");
 });
+
+test("docs route and navigation use the canonical hash", () => {
+  assert.deepEqual(routeFromHash("#/docs"), {
+    page: "docs",
+    useCase: "auction",
+  });
+  assert.equal(hashFor("docs"), "#/docs");
+});

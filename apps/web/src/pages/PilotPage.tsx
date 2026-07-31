@@ -481,6 +481,7 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
         </button>
         <div className="pilot-nav-actions">
           <span className="pilot-network">Testnet · Core v2</span>
+          <a href="#/docs" className="secondary-action compact">Docs</a>
           <button
             type="button"
             className="secondary-action compact"

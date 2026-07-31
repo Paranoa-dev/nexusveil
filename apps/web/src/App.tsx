@@ -6,6 +6,7 @@ import { ArchitecturePage } from "./pages/ArchitecturePage";
 import { ConfigBanner } from "./components/ConfigBanner";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DemoPage } from "./pages/DemoPage";
+import { DocsPage } from "./pages/DocsPage";
 import { LandingPage } from "./pages/LandingPage";
 import { PilotPage } from "./pages/PilotPage";
 import { ToastProvider } from "./ui/Toast";
@@ -37,6 +38,8 @@ export default function App() {
         <DashboardPage goHome={() => navigate("landing")} />
       ) : route.page === "pilot" ? (
         <PilotPage goHome={() => navigate("landing")} />
+      ) : route.page === "docs" ? (
+        <DocsPage goHome={() => navigate("landing")} />
       ) : (
         <>
           <ConfigBanner />
