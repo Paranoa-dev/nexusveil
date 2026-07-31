@@ -1,4 +1,4 @@
-# Ecosystem Integration — Passkey, Relayer, Scaffold
+# Ecosystem Integration - Passkey and Relayer
 
 Sub Rosa's live path uses **Ed25519 session keys + signed mandates** and **direct Soroban RPC**. It also ships optional ecosystem adapters that do not change the core protocol: Passkey-Kit in the web wallet panel, and OpenZeppelin Relayer Channels as an SDK submitter.
 
@@ -14,16 +14,16 @@ Sub Rosa's live path uses **Ed25519 session keys + signed mandates** and **direc
 
 The **mandate** is the off-chain stand-in for what Smart Account Kit encodes as **context rules** and **spending limits**.
 
-## Passkey-Kit (legacy)
+## Passkey-Kit (legacy proof)
 
 - npm: `passkey-kit`
 - Demo: https://passkey-kit-demo.pages.dev/
 - WebAuthn secp256r1 → Stellar smart wallet precursor
 - **Note:** Kalepail recommends **smart-account-kit** for new projects
 
-### When to use
-
-Hackathon jury narrative: the Passkey tab runs **passkey-kit** in-browser — **Create passkey** works on localhost without extra env (default testnet WASM hash is embedded).
+The web application retains a legacy Passkey-Kit proof. New production wallet
+work should use Smart Account Kit after its policy and Soroban authorization
+flows are tested against Core v2.
 
 ## Smart Account Kit (recommended production path)
 
@@ -45,26 +45,19 @@ Hackathon jury narrative: the Passkey tab runs **passkey-kit** in-browser — **
 3. Agent runs same `runBidderAgent` flow but `secretKey` is policy signer
 4. Optional: relayer sponsors fees
 
-## OpenZeppelin Relayer (scored flex)
+## OpenZeppelin Relayer
 
 - Guide: https://docs.openzeppelin.com/relayer/1.3.x/guides/stellar-channels-guide
 - Submits passkey-signed transactions without user holding XLM for fees
 
 ### Sub Rosa stance
 
-| Path | Used in demo? | Why |
+| Path | Current status | Why |
 | --- | --- | --- |
-| Direct Soroban RPC | **Yes** | Proven in all e2e; simplest; no relayer dependency |
+| Direct Soroban RPC | Default | Proven in end-to-end flows; no relayer dependency |
 | OZ Relayer channels | Optional SDK submitter | Production UX for passkey wallets; fee sponsorship |
 
 Relayer does **not** replace keeper or x402 facilitator — it only changes **who pays the Soroban fee** for a signed tx.
-
-## Scaffold Stellar
-
-- Repo: https://github.com/thebadass-dev/scaffold-stellar
-- Standard Vite + Stellar app scaffold
-
-Sub Rosa ships a **custom jury UI** (`apps/web`) rather than Scaffold, but the same stack applies: replace manual keypair with smart-account-kit for wallet connect.
 
 ## x402 + SAC alignment
 

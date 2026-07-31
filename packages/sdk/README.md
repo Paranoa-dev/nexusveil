@@ -1,6 +1,17 @@
 # `@sub-rosa/sdk`
 
-TypeScript client for reading and submitting Sub Rosa Round contract calls.
+Public TypeScript client for Sub Rosa sealed auctions and receipt-only proposal
+rounds on Stellar.
+
+## Install
+
+```bash
+npm install @sub-rosa/sdk
+```
+
+The package ships compiled ESM and TypeScript declarations. Node.js 22 or newer
+is supported. Browser applications should provide the wallet/signing adapter
+used by their Stellar stack.
 
 ## Network configuration
 
@@ -88,3 +99,16 @@ await client.submitV2({ roundId, sealed, escrow: 1_000n });
 The creating wallet must hold and authorize transfer of `lotAmount`. Bidders
 must hold and authorize their public escrow cap. The SDK preflight methods can
 simulate every state-changing call before signing.
+
+## Low-level packages
+
+`@sub-rosa/sdk` installs compatible `@sub-rosa/tlock` and
+`@sub-rosa/round-bindings` versions automatically. Install either package
+directly only when building custom crypto, indexing, or contract tooling.
+
+## Security boundary
+
+The SDK validates configuration and canonical payloads, but it cannot make an
+unknown contract deployment trustworthy. Production applications should pin a
+reviewed network, contract ID, and WASM hash. Core v2 currently has testnet
+proofs and requires independent funds-handling review before mainnet use.

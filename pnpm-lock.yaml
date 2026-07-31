@@ -101,19 +101,22 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@openzeppelin/relayer-plugin-channels':
-        specifier: ^0.20.0
-        version: 0.20.0
+      '@noble/hashes':
+        specifier: ^2.2.0
+        version: 2.2.0
       '@stellar/stellar-sdk':
         specifier: ^15.1.0
         version: 15.1.0
       '@sub-rosa/round-bindings':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../round-bindings
       '@sub-rosa/tlock':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../tlock
     devDependencies:
+      '@openzeppelin/relayer-plugin-channels':
+        specifier: ^0.20.0
+        version: 0.20.0
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.1

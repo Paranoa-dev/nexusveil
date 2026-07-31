@@ -6,13 +6,13 @@ Sub Rosa **does not require a committed `.env` file**. Secrets stay out of git; 
 
 | Layer | Needs env? | When vars are read |
 | --- | --- | --- |
-| **Jury UI** (`apps/web`) | Optional | **Build time** (`VITE_*` baked into static JS) |
+| **Hosted pilot UI** (`apps/web`) | Optional | **Build time** (`VITE_*` baked into static JS) |
 | **Keeper / appraisal API** | Yes (secrets) | **Runtime** (shell, systemd, Fly/Railway secrets) |
 | **One-off scripts** (deploy, e2e) | Yes | **Runtime** (inline `VAR=… command` or CI secrets) |
 
 ---
 
-## 1. Jury UI — ship without any env
+## 1. Hosted pilot UI - ship without any env
 
 The demo works from **embedded `DEMO_TRACE`** (`demo-trace.generated.ts` from `pnpm agents:e2e`). No `.env` needed.
 
@@ -35,7 +35,7 @@ Host `dist/` on Vercel, Netlify, Cloudflare Pages, GitHub Pages, S3, etc.
 
 ---
 
-## 2. Jury UI — optional live contract poll
+## 2. Hosted pilot UI - optional live contract poll
 
 Only if you want **“Poll live contract”** on the deployed site, set these **before `pnpm web:build`** in the hosting UI (Vercel → Settings → Environment Variables, etc.).
 
@@ -174,7 +174,7 @@ Agents point at the public URL via `X402_APPRAISAL_URL` — not baked into the w
 ## Quick decision tree
 
 ```
-Shipping jury demo only?
+Shipping the hosted pilot UI only?
   → pnpm web:build, upload dist/, no env
 
 Want live on-chain overlay on the site?

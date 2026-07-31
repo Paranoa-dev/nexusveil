@@ -74,7 +74,7 @@ captures the threat-model-relevant surface.
 | Forged receipt | Verifier recomputes `sha256(be16(value) ‖ nonce)` against the stored commitment for every revealed bid; winner is derived from a deterministic clearing rule, not trusted from the exporter | Exporter can still lie about on-chain facts the receipt does not bind to (see `docs/LIMITATIONS.md`); consumers should cross-check against current ledger state |
 | Tampered passphrase | `networkFingerprint = sha256(utf8(network))` is embedded in the receipt, so editing the claimed network invalidates the fingerprint | Operationally annoying but bounded — valid `null` ciphertext/auditorBlob after expiry is reported as a warning, not a failure |
 | Recycled / replayed receipt | Receipts are versioned (`version: 1`) and status-bound (`Cleared` / `Settled` / `Voided`); receipts are exported with the on-chain state at the time of export | A receipt from a later status can be presented as evidence of an earlier state — re-export and reconcile before relying on a receipt for high-value disputes |
-| Single-exporter trust | Anyone can re-export the same round from the RPC and diff; idempotent `settle` skips already-settled bids, so two honest exporters always converge | Forensic, not automatic — see SCF/Wave diligence guidance in `docs/PILOT_PLAYBOOK.md` |
+| Single-exporter trust | Anyone can re-export the same round from the RPC and diff; idempotent settlement skips already-settled state, so two honest exporters converge | Forensic, not automatic; follow the evidence requirements in `docs/PILOT_PLAYBOOK.md` |
 
 ## Trust assumptions
 

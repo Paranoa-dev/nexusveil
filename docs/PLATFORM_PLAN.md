@@ -1,217 +1,101 @@
-# Sub Rosa Partner-Ready Platform Plan
+# Partner-Ready Platform Plan
 
 ## Objective
 
-Bring Sub Rosa to a point where a new Stellar project can run a credible pilot
-through configuration, a hosted flow, or a small SDK integration instead of a
-partner-specific protocol rewrite.
+Sub Rosa should let a Stellar project run a credible testnet pilot through a
+hosted flow or a small SDK integration. A partner should configure a reviewed
+template, not request a protocol fork.
 
-The product and the platform deliberately have different scopes:
+The product has one primary economic wedge and one supporting integration mode:
 
-- **Product wedge:** escrow-backed sealed auctions on Stellar.
-- **Platform capability:** reusable sealed rounds with structured submissions,
-  verifiable reveal, eligibility policies, receipts, and audited settlement
-  templates.
+- **Primary:** asset-backed sealed auctions with atomic payment-for-lot
+  settlement.
+- **Supporting:** receipt-only confidential proposals with verifiable
+  simultaneous reveal and no asset custody.
 
-The focused product wedge answers the SCF Open Track feedback. The reusable
-platform, templates, verification, and APIs answer the builder feedback without
-turning the funding narrative back into five equal use cases.
+This keeps the economic case focused while making the underlying protocol
+reusable across partners with different engineering capacity.
 
-## Positioning rule
+## Integration levels
 
-Every public funding or product narrative must lead with sealed auctions. Other
-workflows are integration evidence or future templates, not separate products.
-
-> Sub Rosa is embeddable sealed-auction infrastructure for Stellar. Its shared
-> round SDK can also support partner workflows that need private submissions and
-> a verifiable simultaneous reveal.
-
-## Target integration experience
-
-A partner chooses the lightest integration that fits its capacity:
-
-| Mode | Partner effort | Sub Rosa surface |
+| Level | Partner effort | Sub Rosa surface |
 | --- | --- | --- |
-| Hosted pilot | No production code change | Hosted round URL |
-| Embedded flow | Small UI change | Widget or web component |
-| Native integration | Full product control | TypeScript SDK |
-| Operations integration | Backend automation | Read API and webhooks |
+| Hosted pilot | No production code change | Public pilot URL and receipt |
+| Embedded experience | Small UI or routing change | Hosted round flow linked from partner product |
+| Native integration | Product-controlled UX | `@sub-rosa/sdk` template APIs |
+| Operations integration | Backend automation | Keeper status API and public round reads |
 
-Wallet signatures and encryption remain client-side. A hosted API must never
-custody partner or participant signing keys.
+Wallet signatures and encryption remain client-side. Sub Rosa services must
+never receive participant secret keys.
 
-## Architecture target
+## Reviewed templates
 
-```text
-Sealed Round Core
-  - versioned structured payload commitment
-  - Drand-gated reveal
-  - deadlines and eligibility
-  - supported selection rules
-  - canonical public receipts
+| Template | Payload | Settlement | Partner profile |
+| --- | --- | --- | --- |
+| Asset auction | Amount and item reference | Winner payment to seller; lot to winner | Marketplace, issuer, game, collectible, tokenized asset |
+| Sealed proposal | Price, timeline, approach | Receipt only | Service marketplace or procurement discovery flow |
 
-Verified Settlement Templates
-  - no settlement / reveal receipt
-  - forward auction
-  - atomic asset sale
-  - reverse procurement (after the auction pilot)
+Additional templates may be added only when a concrete partner workflow needs
+them. New funds-handling behavior requires contract review and tests; it is not
+implemented through arbitrary callbacks.
 
-Integration Layer
-  - @sub-rosa/tlock
-  - @sub-rosa/sdk
-  - hosted round application
-  - read API, event indexer, and webhooks
-  - partner templates
-```
+## Completion gates
 
-Settlement extensions must not become an unaudited arbitrary-callback system.
-The production SDK and hosted UI will recognize versioned, reviewed adapter code
-hashes and clearly reject or warn on unverified deployments.
+### Protocol
 
-## Supported templates
+- Versioned payloads bind the complete submission.
+- Drand signatures are verified on-chain before reveal.
+- Auction settlement conserves payment and lot assets across settle and void.
+- Supported participant and duration limits are explicit.
+- Core v2 contract tests cover happy paths and funds-return failure paths.
 
-Templates configure one protocol; they do not fork it.
+### SDK
 
-| Template | Submission | Selection | Settlement | Role in evidence |
-| --- | --- | --- | --- | --- |
-| Asset auction | Amount plus lot metadata | Highest valid bid | Payment to seller; lot to winner | Primary product and economic pilot |
-| Sealed proposal | Price, timeline, approach | Organizer choice | None in first pilot | SDK/design-partner proof |
-| Procurement | Price plus proposal | Lowest bid or organizer choice | Sponsor escrow to provider | Later reviewed template |
+- Public ESM packages contain compiled JavaScript and declarations.
+- High-level auction and proposal templates hide raw contract argument wiring.
+- Package tarballs install and import in a clean external project.
+- Public reads do not require a wallet or secret key.
+- Mutating operations expose preflight simulation and typed errors.
 
-Grants, voting, judging, and other broad coordination examples do not lead the
-SCF resubmission.
+### Hosted pilot
 
-## Partner-ready completion gate
+- A partner can open a testnet round without changing production code.
+- Participants can submit, follow status, and verify the final receipt.
+- Keeper health and lifecycle state are visible.
+- The hosted service never accepts signing secrets.
 
-Sub Rosa is ready for repeatable outreach when all of the following are true:
+### External evidence
 
-### Protocol and security
+- One design partner completes a receipt-only proposal pilot.
+- One economic partner completes an atomic asset-auction pilot.
+- Each pilot includes external participants, public round IDs, and feedback.
+- The economic pilot reports escrow, settlement, and refund results.
+- A qualified independent reviewer evaluates funds-handling paths before a
+  production mainnet launch.
 
-- Structured payloads are versioned and byte-deterministic.
-- Commitments bind the complete revealed submission, not only an amount.
-- Seal TTL is valid through the configured reveal window.
-- Settlement cannot exceed Soroban resource limits for the supported cohort.
-- Escrow policy does not disclose the exact sealed bid by default.
-- Round assets, void paths, and refunds conserve funds under tests.
-- Production limits and unaudited boundaries are explicit.
+## Delivery order
 
-### SDK and integration
-
-- `@sub-rosa/tlock` supports generic sealed payloads and legacy bids.
-- `@sub-rosa/sdk` exposes high-level round and template APIs.
-- Packages build as publishable artifacts with versioned exports.
-- A hosted pilot works without changes to a partner's production codebase.
-- Read API and receipts expose round status without private keys.
-- Webhooks provide reveal, clear, settle, and void lifecycle notifications.
-- A fresh integrator can complete the documented sandbox flow in one session.
-
-### Product evidence
-
-- One named design partner completes a structured-submission testnet pilot.
-- One named economic partner completes an escrow-backed auction pilot.
-- Each pilot publishes round IDs, participant count, receipts, and feedback.
-- The economic pilot reports total escrow and settlement/refund results.
-- A partner provides a written go/no-go or next-step decision.
-- A qualified external reviewer is named before capped mainnet funds.
-
-## Delivery sequence
-
-### 1. Versioned payload foundation
-
-- Define a domain-separated binary envelope for optional amount, nonce, and
-  arbitrary application payload bytes.
-- Keep the existing 48-byte bid format available for deployed v1 contracts.
-- Add deterministic vectors, malformed-input tests, and a live Drand roundtrip.
-
-**Exit:** proposal and auction metadata can be sealed, opened, and committed to
-without ambiguous serialization.
-
-### 2. Sealed Round Core v2
-
-- Add round/template versioning and a schema reference.
-- Verify the full payload commitment on reveal.
-- Add explicit auction and receipt-only lifecycle behavior.
-- Make TTL policy deadline-aware and bound supported round duration.
-- Replace unsafe all-bidder settlement assumptions with a measured cohort cap
-  or batched/claim-based completion path.
-
-**Exit:** contract tests prove reveal integrity, liveness, and resource-safe
-completion for the published limits.
-
-### 3. Settlement templates
-
-- Move payment asset selection to round configuration.
-- Implement forward-auction settlement first.
-- Implement atomic lot custody and payment-for-asset exchange.
-- Return lot and bidder funds on every void/no-bid path.
-- Add a privacy-preserving escrow policy such as a uniform auction cap.
-
-**Exit:** a testnet asset auction atomically pays the seller and transfers the
-lot to the winner with loser refunds.
-
-### 4. SDK v2
-
-- Add high-level `createRound`, `submit`, `getStatus`, and `getReceipt` APIs.
-- Add typed template builders and wallet/signer adapters.
-- Produce publishable ESM artifacts and stable package exports.
-- Retain low-level contract access for advanced integrators.
-
-**Exit:** partner code uses a template API rather than raw Soroban binding
-arguments.
-
-### 5. Hosted integration and API
-
-- Build organizer, participant, reveal, comparison, and receipt views.
-- Add hosted round links and an embeddable surface.
-- Add a read-only indexer/API and signed lifecycle webhooks.
-- Never accept participant secret keys in the service.
-
-**Exit:** a partner can run a testnet pilot without changing its production
-codebase.
-
-### 6. First design-partner pilot
-
-- Run a generic service-proposal flow suitable for The Signal.
-- Support configurable price, timeline, and approach fields.
-- Record at least one realistic request and three external submissions.
-- Publish a receipt and collect structured product feedback.
-
-**Exit:** a named partner validates the SDK and hosted integration experience.
-
-### 7. Economic auction pilot
-
-- Confirm a forward-auction partner and representative asset.
-- Run at least one auction with three external bidders.
-- Publish escrow, atomic asset settlement, refunds, and partner feedback.
-
-**Exit:** the primary product demonstrates real external demand and meaningful
-on-chain settlement.
-
-### 8. Review and capped mainnet path
-
-- Prepare threat model, invariants, resource measurements, and deployment hashes.
-- Complete an independent Soroban/Rust review.
-- Resolve findings and run a capped, opt-in mainnet auction.
-
-**Exit:** production claims are supported by review evidence and a deliberately
-limited real-asset deployment.
+1. Publish and independently install-test the SDK packages.
+2. Run the hosted `ReceiptOnly` flow with a design partner.
+3. Run an `Auction` flow with an asset marketplace or issuer.
+4. Publish pilot receipts, integration effort, failures, and partner decisions.
+5. Complete an external contract review.
+6. Resolve findings and define a capped mainnet beta.
 
 ## Outcome metrics
 
-Engineering outputs alone do not close the SCF feedback. Track and publish:
+Engineering output alone is not adoption evidence. Track:
 
-- named partners and their exact commitment level;
-- time and code required for integration;
-- external participants per round;
-- completed, voided, and failed rounds;
-- escrow and settled volume;
-- refund correctness;
+- time and code required for partner integration;
+- number of external participants and completed rounds;
+- total escrow and settled value for auction pilots;
+- refund correctness and lifecycle failures;
 - partner feedback and go/no-go decisions;
-- security review scope and resolved findings.
+- repeat-round or production-integration intent;
+- external review findings and resolutions.
 
-## Current scope boundary
+## Current boundary
 
-The existing v1 mainnet and testnet artifacts remain historical protocol proof.
-They must not be silently described as the future modular platform. Core v2,
-settlement templates, SDK v2, and their deployment hashes will be versioned and
-documented separately.
+Core v2 has public testnet proofs for both templates. The mainnet artifact is a
+legacy v1 settlement proof. No document should describe Core v2 as audited or
+production-ready until an independent funds-handling review is complete.

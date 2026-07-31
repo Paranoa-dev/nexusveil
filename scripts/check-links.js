@@ -15,14 +15,15 @@ const FILES = [
   'docs/DEPLOY.md',
   'docs/DEMO_SCRIPT.md',
   'docs/INTEGRATION.md',
+  'docs/PLATFORM_PLAN.md',
+  'docs/PILOT_PLAYBOOK.md',
   'docs/RECEIPTS.md',
-  'docs/SCF_PLAN.md',
-  'docs/CV_LABS_APPLICATION.md',
   'docs/LIMITATIONS.md',
   'docs/ECOSYSTEM.md',
-  'docs/TRACK_ANSWERS.md',
-  'docs/PILOT_PLAYBOOK.md',
+  'docs/CI.md',
   'packages/round-bindings/README.md',
+  'packages/tlock/README.md',
+  'packages/sdk/README.md',
 ];
 
 // Allowlist for intentional placeholder links.

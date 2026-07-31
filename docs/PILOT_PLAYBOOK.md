@@ -1,99 +1,83 @@
-# Sub Rosa Pilot Playbook
+# Partner Pilot Playbook
 
-## Positioning
+## Purpose
 
-Sub Rosa is escrow-backed sealed auction infrastructure for Stellar apps.
+Pilots exist to test demand and integration quality, not to repeat an internal
+demo. Every pilot must use external participants and end with a written partner
+decision.
 
-Bidders lock Stellar assets, submit bids that remain unreadable until a shared
-Drand reveal round, and then Soroban clears the auction, pays the operator, and
-refunds losing escrow deterministically.
+Sub Rosa supports two pilot tracks:
 
-## Pilot Goal
+| Track | Template | Question |
+| --- | --- | --- |
+| Design-partner pilot | `ReceiptOnly` sealed proposal | Can another platform embed confidential submissions with little engineering work? |
+| Economic pilot | `Auction` asset sale | Does sealed bidding plus atomic settlement create enough value to run repeated rounds? |
 
-The pilot should answer one question:
+An interested team is not a completed pilot. Name a partner publicly only at
+the commitment level they explicitly approved.
 
-> Does a real Stellar team need sealed on-chain bidding enough to run repeated
-> rounds?
+## Design-partner pilot
 
-The pilot is not a generic demo of privacy. It is a focused test of whether
-sealed auctions or competitive bid rounds create value for an operator and
-participants.
+Use this track for a service marketplace or similar platform that wants private
+price, timeline, and approach submissions without escrow in the first version.
 
-## Target Pilot Profiles
+Minimum flow:
 
-Prioritize teams with funds movement or real competitive bids:
+1. Partner supplies one realistic request.
+2. At least three external providers submit sealed proposals.
+3. No proposal is readable before the configured Drand round.
+4. Proposals reveal together and produce a canonical receipt.
+5. Partner records integration effort, usability feedback, and next step.
 
-1. auction or marketplace operator;
-2. asset issuer running a sale or allocation round;
-3. procurement-style workflow where suppliers submit competitive bids;
-4. Stellar ecosystem team awarding a paid bounty through sealed bids;
-5. DeFi or intent-style app that needs sealed order collection before clearing.
+This track validates the SDK, hosted flow, and proposal UX. It does not count as
+economic settlement evidence.
 
-Do not describe a partner as confirmed until they explicitly agree to run a
-pilot or provide a written design-partner note.
+## Economic auction pilot
 
-## Pilot Scope
+Use this track for a marketplace, asset issuer, game, collectible, or other
+Stellar application with a real auctionable lot.
 
-A good first pilot is small and measurable:
+Minimum flow:
 
-- 3 sealed auction rounds on Stellar testnet;
-- 3-10 bidders per round;
-- USDC or XLM SAC escrow;
-- public round IDs and settlement receipts;
-- operator feedback after each round;
-- a final go/no-go decision for a capped mainnet beta.
+1. Seller deposits one testnet lot into the round contract.
+2. At least three external bidders submit sealed bids and public escrow caps.
+3. Drand opens the reveal for all submissions.
+4. The contract chooses the highest valid bid.
+5. One settlement transfers winner payment to the seller and the lot to the
+   winner.
+6. Losing escrow is refunded and the final receipt is published.
 
-## Success Criteria
+The first pilot remains on testnet. Mainnet requires independent contract
+review and explicit value caps.
 
-| Question | Evidence |
+## Evidence record
+
+Capture the following for every round:
+
+- partner and exact commitment level;
+- contract ID, round ID, network, and Drand round;
+- template and payload schema;
+- number of external participants;
+- total escrow, winning payment, lot amount, and refund status when applicable;
+- keeper actions and final status;
+- integration time and partner code changes;
+- participant and organizer feedback;
+- defects or confusing states;
+- written go/no-go or next-step decision.
+
+## Success criteria
+
+| Question | Required evidence |
 | --- | --- |
-| Did anyone need sealed bidding? | Partner explains the leakage or trust problem in their own words |
-| Did settlement matter? | Bids were escrow-backed; winner payment and loser refunds are visible |
-| Could an operator run it? | Partner creates or monitors a round with docs/support |
-| Did participants understand it? | Bidders can commit, wait for R, and verify reveal |
-| Is there repeat potential? | Partner wants another round, mainnet beta, or integration work |
+| Was early information leakage a real problem? | Partner describes the problem in its own workflow |
+| Was integration lightweight? | Measured setup time and code changes |
+| Did the protocol complete? | Public settled round and receipt |
+| Were funds conserved? | Auction settlement and refunds match round state |
+| Did users understand the flow? | External participant feedback |
+| Is there repeat potential? | Another round, integration request, or explicit no-go with reasons |
 
-## Outreach Message
+## Outreach rule
 
-> Sub Rosa won 1st Place in the Hack Privacy Track at Build On Stellar. We are
-> narrowing the next SCF submission to one use case: escrow-backed sealed
-> auctions on Stellar. Bidders lock assets, bids stay unreadable until a public
-> Drand reveal, and Soroban settles the winner and refunds losers. Would you be
-> open to a small testnet pilot for an auction, sale, bounty, or competitive bid
-> workflow?
-
-## Demo Narrative
-
-The SCF-facing walkthrough should make the auction workflow obvious:
-
-1. An operator creates a sealed auction round.
-2. Bidders lock escrow and submit sealed bids.
-3. No bidder or operator can read bids before Drand R.
-4. Drand unlocks the reveal for the entire bid set.
-5. Soroban validates commitments, selects the winning bid, pays the operator,
-   and refunds losers.
-6. The operator publishes a receipt with round ID, Drand R, bid set,
-   settlement, and final contract balance.
-
-## Pilot Report Template
-
-For each pilot round, capture:
-
-- partner/operator name;
-- round ID and contract ID;
-- asset and total escrow;
-- number of bidders;
-- winning bid and settlement amount;
-- refund status;
-- keeper action timestamp;
-- participant/operator feedback;
-- next action.
-
-## Short Social Post
-
-Sub Rosa is preparing focused Stellar pilots for escrow-backed sealed auctions:
-bids stay hidden until a public Drand reveal, then Soroban settles the winner
-and refunds losers.
-
-If you run an auction, marketplace, asset sale, bounty, or competitive bid
-workflow on Stellar, I would love to test a small round with you.
+Approach partners only after the public SDK installs from a clean project and
+the hosted template is available. Offer the smallest pilot that fits their
+capacity; do not ask them to rewrite their application or commit to mainnet.

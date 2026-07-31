@@ -1,6 +1,6 @@
 # Known Limitations
 
-Honest boundaries for the current prototype and submission materials. No hidden
+Honest boundaries for the current protocol and pilot software. No hidden
 fallbacks.
 
 ## Network scope
@@ -26,7 +26,7 @@ Mainnet does **not** replay 700 / 459 USDC demo amounts. Mainnet smoke uses **1 
 - **Passkey-Kit** — UI demo + ecosystem docs; agents use Ed25519 session keys in this build.
 - **Hosted appraisal API on mainnet** — x402 proof is testnet-only in automated e2e.
 
-## UI demo trace
+## Hosted UI trace
 
 - **Single canonical trace** — `apps/web/src/demo/demo-trace.generated.ts`, written by `pnpm agents:e2e`.
 - Covers agents → x402 → sealed commits → keeper reveal → clear → settle on one testnet contract.
@@ -42,7 +42,10 @@ Round receipts (`docs/RECEIPTS.md`) are **offline only** — the verifier checks
 - Temporary storage expires after the reveal window — seals are not kept forever by design.
 - Mainnet wasm upload requires substantial XLM for resource fees (~30+ XLM observed).
 
-## Intentional PRD deviation
+## Production boundary
 
-- **Two autonomous agents** instead of one — stronger supporting proof on testnet.
-  The winning hackathon track was Hack Privacy.
+- Core v2 has settled testnet proofs but no independent funds-handling audit.
+- The published SDK does not make an arbitrary contract deployment safe; apps
+  must pin the reviewed contract ID, network, and WASM hash.
+- The legacy v1 mainnet round is protocol evidence, not a Core v2 production
+  deployment.

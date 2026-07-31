@@ -1,9 +1,10 @@
 # Sub Rosa Round Contract
 
-Soroban primitive that runs a sealed commit → verifiable-reveal →
-on-chain-settle coordination round. Bids are sealed with Drand timelock
-encryption until a future round `R`; round `R`'s threshold signature is
-verified on-chain (BLS12-381) to force a simultaneous reveal.
+Soroban contract for sealed asset auctions and receipt-only proposal rounds.
+Submissions are sealed with Drand timelock encryption until a future round `R`;
+round `R`'s threshold signature is verified on-chain (BLS12-381) before the
+contract accepts a simultaneous reveal. Auction mode atomically exchanges the
+winner payment for the seller's lot and refunds remaining escrow.
 
 - **Entry points**: [`src/lib.rs`](src/lib.rs)
 - **Types and status machine**: [`src/types.rs`](src/types.rs)

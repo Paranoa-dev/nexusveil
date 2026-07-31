@@ -1,122 +1,116 @@
-# Sub Rosa — Technical Design
+# Technical Design
 
-## Architecture
+See [ARCHITECTURE.md](../ARCHITECTURE.md) for the component map and trust
+boundaries. This document covers the Core v2 cryptography, storage, and
+settlement model.
 
-See [ARCHITECTURE.md](../ARCHITECTURE.md) for the system overview. This document covers cryptography, storage, and settlement detail.
+## Core v2
 
-## Overview
+Sub Rosa is sealed-round infrastructure for Stellar applications. Participants
+commit versioned, timelock-encrypted payloads to a future Drand round `R`. The
+Soroban contract verifies the Drand BLS12-381 signature before accepting
+reveals, validates every payload against its commitment, and completes the
+configured reviewed mode deterministically.
 
-Sub Rosa is a **sealed commit–reveal coordination primitive** on Stellar Soroban. Participants lock escrow and submit timelock-encrypted bids; a public Drand round R forces simultaneous decryption; the contract clears and settles deterministically.
+| Mode | Escrow | Completion |
+| --- | --- | --- |
+| `Auction` | Payment caps from bidders and lot custody from seller | Highest valid bid pays seller; lot moves to winner; remaining escrow is refunded |
+| `ReceiptOnly` | Forbidden | Revealed submission set and canonical completion receipt |
 
-## Architecture
+## Payload envelope
 
-```
-┌─────────────┐     sealBid (tlock)      ┌──────────────────┐
-│ Bidder /    │ ───────────────────────► │ Round contract   │
-│ Agent       │     commit(H,C,blob)     │ (Soroban)        │
-└─────────────┘                          └────────┬─────────┘
-       │ x402 appraisal                           │
-       ▼                                          │ open_reveal(BLS sig)
-┌─────────────┐                          ┌────────▼─────────┐
-│ Appraisal   │                          │ Keeper (anyone)  │
-│ API         │                          │ reveal → clear   │
-└─────────────┘                          │ → settle         │
-                                           └──────────────────┘
-```
+Core v2 binds the complete structured submission, not only a numeric value. The
+domain-separated envelope includes:
 
-### Packages
+- envelope version;
+- schema identifier;
+- optional amount;
+- nonce;
+- application payload bytes.
 
-| Package | Role |
-| --- | --- |
-| `contracts/round` | Soroban Round — storage, BLS verify, SAC settle |
-| `packages/tlock` | Off-chain seal: `sealBid` / `openBid`, auditor blob |
-| `packages/sdk` | `SubRosaClient` — bindings + direct RPC or optional OZ Channels submit |
-| `services/keeper` | Permissionless open/reveal/clear/settle (+ watch mode) |
-| `services/appraisal-api` | x402-gated appraisal (SEP-41 USDC) |
-| `services/agent` | Multi-agent bidders with session mandates |
-| `apps/web` | Jury demo UI |
+The contract rejects unsupported versions, malformed payloads, and oversized
+application data. SDK templates own schema-specific encoding so partner
+applications do not construct envelope bytes manually.
 
 ## Cryptography
 
-### Timelock seal (bid values)
+### Timelock encryption
 
-- Scheme: Drand quicknet `bls-unchained-g1-rfc9380` via `tlock-js`
-- Preimage: `be16(value) ‖ nonce` (32 bytes)
-- Commitment: `H = sha256(preimage)` verified in-contract at reveal
-- Unlock: round-R threshold signature verified on-chain (BLS12-381 host fns)
+- Drand network: quicknet `bls-unchained-g1-rfc9380`
+- Ciphertext: tlock IBE sealed to a future round `R`
+- Commitment: SHA-256 over the canonical plaintext envelope
+- Unlock: round-`R` threshold signature verified on-chain
 
-### Auditor blob (bidder identity)
+### Auditor identity blob
 
-- X25519 ECDH + HKDF-SHA256 + XChaCha20-Poly1305
-- Stored in temporary contract storage alongside ciphertext
-- Only the round's designated auditor secret can decrypt
+- X25519 ECDH
+- HKDF-SHA256
+- XChaCha20-Poly1305
+- Stored alongside the ciphertext in temporary contract storage
 
-### On-chain BLS
+The auditor blob provides selective identity recovery. It does not give the
+auditor early access to the encrypted application payload.
 
-Deploy constants validated via `services/drand-tools` against live quicknet. Contract rejects wrong-round signatures and malformed G1 points.
+## Storage
 
-## Storage model
+| Tier | Contents | Lifetime |
+| --- | --- | --- |
+| Instance | Drand configuration and round counter | Contract lifetime with TTL extension |
+| Persistent | Round configuration, participant state, escrow, clearing and settlement flags | Through completion/void and configured retention |
+| Temporary | Ciphertext and auditor blob | Through reveal deadline plus observer buffer |
 
-| Tier | Key | Contents | TTL policy |
-| --- | --- | --- | --- |
-| Instance | `Config`, `RoundCounter` | Drand pubkey, DST, genesis, period, USDC SAC | Extended on every mutating call (~60 days bump) |
-| Persistent | `Round(id)`, `State(id, bidder)` | Round record, escrow, revealed value, settlement flags | Extended on read/write (~60 days bump); required for clear/settle/void |
-| Temporary | `Seal(id, bidder)` | Ciphertext + auditor blob | Extended on commit, `open_reveal`, and `get_seal` reads to cover `reveal_deadline + 1 day`; auto-expires afterward |
+Seal TTL is derived from the reveal deadline. Settlement never depends on
+temporary ciphertext after the validated reveal state has been persisted.
 
-### Cleanup semantics
+## Auction settlement
 
-- **Seals (Temporary)** are intentionally ephemeral. After the reveal window plus a one-day observer buffer, `get_seal` returns `None`. This is by design — observers see the sealed → gone lifecycle.
-- **Settlement data (Persistent)** is never dropped silently. `clear`, `settle`, and `void` operate only on persistent bid state and escrow; they remain available even after seals expire.
-- **`open_reveal`** re-extends every committed seal through the reveal window so keeper/observer reads stay available during the revealing phase.
-- Seal TTL is computed from `reveal_deadline`, not a fixed constant, so long pre-reveal commit windows do not lose ciphertext before Drand round R.
+The `Auction` mode uses two SEP-41 Stellar Asset Contracts:
 
-## Settlement rails
-
-Two **SEP-41 token** paths on testnet (USDC SAC):
-
-1. **x402** — agent → appraisal server micro-payment (HTTP 402, signed auth entry, facilitator settles on RPC). Used for **appraisal only**. Testnet-only in automated e2e.
-2. **SAC `settle()`** — contract transfers winner escrow → operator; refunds losers. Used for **prize settlement**. Not x402.
-
-Same asset rail on a given network (USDC on testnet); authorization differs. Mainnet smoke uses **native XLM SAC**, not USDC — see `docs/LIMITATIONS.md`.
-
-## Agent authorization
-
-- **Off-chain mandate**: principal signs caps (maxBid, maxEscrow, maxAppraisalSpend) for a session Ed25519 key
-- **On-chain cap**: `valid = value > 0 && value ≤ escrow` at reveal
-- **Production path**: Passkey / OpenZeppelin Smart Account with policy signers (see `docs/ECOSYSTEM.md`)
-
-## Relayer Strategy
-
-Critical path uses **direct Soroban RPC** (proven live). The SDK also exposes an optional OpenZeppelin Relayer Channels submitter:
-
-```ts
-import { SubRosaClient, createOzChannelsSubmitterFromEnv } from "@sub-rosa/sdk";
-
-const sdk = new SubRosaClient({
-  rpcUrl,
-  networkPassphrase,
-  contractId,
-  secretKey,
-  submitter: createOzChannelsSubmitterFromEnv(),
-});
+```text
+winner payment escrow -> seller
+lot custody            -> winner
+unused winner escrow   -> winner
+loser escrow           -> each loser
 ```
 
-If the submitter is absent, the SDK signs and submits exactly as before. If present, it signs locally, sends signed XDR through Channels, then reads finality/result over Soroban RPC.
+These transfers occur under one reviewed settlement path. If a round is voided
+or has no valid winner, the contract returns the lot and bidder escrow according
+to the tested void rules.
 
-## Live proof commands
+`ReceiptOnly` rejects non-zero escrow and does not invoke asset transfers.
 
-```bash
-pnpm lifecycle:e2e    # full round, 2 bidders, USDC SAC
-pnpm agents:e2e       # multi-agent + x402 + keeper → single UI trace
-pnpm appraisal:e2e    # x402 appraisal settle
-pnpm keeper:e2e       # permissionless reveal
-pnpm sdk:smoke        # deploy + commit smoke
-pnpm mainnet:deploy   # mainnet wasm + round
-pnpm mainnet:settle   # mainnet keeper close
-pnpm keeper:watch     # polling keeper daemon
-```
+## Permissionless lifecycle
 
-## Mainnet artifacts
+The operator configures the round but does not control reveal or settlement.
+After the relevant deadlines and Drand round, any account may invoke lifecycle
+operations. A keeper provides operational liveness without receiving special
+decryption or settlement authority.
 
-- Contract: `CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX`
-- Round 1: committed, revealed, cleared, settled (native XLM SAC smoke)
+## SDK and bindings
+
+| Package | Role |
+| --- | --- |
+| `@sub-rosa/sdk` | Client, templates, preflight, receipts, status API |
+| `@sub-rosa/tlock` | Timelock seal/open, payload encoding, auditor encryption |
+| `@sub-rosa/round-bindings` | Generated spec-accurate Soroban client and types |
+
+The public packages ship compiled ESM and TypeScript declarations. Generated
+bindings are never hand-edited; CI checks them against the contract WASM.
+
+## Optional transaction submitter
+
+Direct Soroban RPC is the default. The SDK also supports an OpenZeppelin Relayer
+Channels submitter. Signing stays local; the submitter changes transaction
+delivery and fee sponsorship, not contract authorization or settlement rules.
+
+## Verified deployments
+
+- Core v2 testnet contract:
+  `CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P`
+- Core v2 testnet WASM:
+  `c6eb47b06b95f612361596944ce39f0545d3b11d93678952cef67dec09cce91e`
+- Legacy v1 mainnet settlement proof:
+  `CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX`
+
+Core v2 is not described as audited production software. See
+[LIMITATIONS.md](./LIMITATIONS.md).

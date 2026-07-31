@@ -1,7 +1,7 @@
 {
   "name": "@sub-rosa/tlock",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "description": "Off-chain seal for Sub Rosa: tlock encrypt/decrypt to a Drand round + auditor identity blob, byte-compatible with the Round contract.",
   "keywords": [
@@ -18,8 +18,36 @@
     "url": "https://github.com/karagozemin/Sub-Rosa.git",
     "directory": "packages/tlock"
   },
-  "main": "src/index.ts",
+  "license": "MIT",
+  "homepage": "https://github.com/karagozemin/Sub-Rosa/tree/main/packages/tlock#readme",
+  "bugs": {
+    "url": "https://github.com/karagozemin/Sub-Rosa/issues"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "sub-rosa-recover-identities": "./dist/recover-identities.cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
     "test": "node --import tsx --test src/commitment.test.ts src/payload.test.ts src/auditor.test.ts src/auditor-recovery-cli.test.ts src/bls.test.ts src/seal.test.ts src/freshness.test.ts src/quicknet.test.ts",
     "test:quicknet": "node --import tsx --test src/quicknet.test.ts",
     "test:unit": "node --import tsx --test src/commitment.test.ts src/payload.test.ts src/auditor.test.ts src/auditor-recovery-cli.test.ts src/bls.test.ts src/freshness.test.ts src/quicknet.test.ts",

@@ -1,183 +1,158 @@
 # Integrating Sub Rosa
 
-Sub Rosa does not require users to come to the Sub Rosa demo app. The demo app
-is a showcase. The intended product surface is a Soroban contract plus
-TypeScript packages that auction and competitive-bid apps can embed.
+Sub Rosa can be used through a hosted pilot or embedded through the public
+TypeScript SDK. The contract, SDK, keeper, and receipt format are shared across
+the reviewed templates.
 
-## Target integration
+## Install
 
 ```bash
-npm install @sub-rosa/sdk @sub-rosa/tlock
+npm install @sub-rosa/sdk
 ```
 
-`@sub-rosa/sdk` is already present in this monorepo as `packages/sdk`. Publishing
-to npm is a release step, not a protocol requirement.
+`@sub-rosa/sdk` depends on version-matched releases of `@sub-rosa/tlock` and
+`@sub-rosa/round-bindings`. Install those packages directly only when using
+their lower-level APIs.
 
-## What an app integrates
-
-An integrating app usually needs four pieces:
-
-| Piece | Role |
-| --- | --- |
-| Round contract | Stores commitments, ciphertext, escrow, deadlines, Drand R, reveal state |
-| `@sub-rosa/sdk` | Creates rounds and submits contract calls from app backend/frontend |
-| `@sub-rosa/tlock` | Seals values to Drand R and opens ciphertext after R |
-| Keeper | Opens reveal and settles when Drand R is live; permissionless by design |
-
-## Minimal flow
+## Client configuration
 
 ```ts
 import { SubRosaClient } from "@sub-rosa/sdk";
-import { generateNonce, quicknet, sealBid } from "@sub-rosa/tlock";
 
-const drand = quicknet();
 const client = new SubRosaClient({
-  rpcUrl,
-  networkPassphrase,
-  contractId,
-  secretKey,
-});
-
-const sealed = await sealBid({
-  value,
-  nonce: generateNonce(),
-  round: revealRound,
-  client: drand,
-  identity,
-  auditorPublicKey,
-});
-
-await client.commit({
-  roundId,
-  sealed,
-  escrow,
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  contractId: process.env.ROUND_CONTRACT_ID!,
+  publicKey: process.env.STELLAR_PUBLIC_KEY,
 });
 ```
 
-After Drand round `R` is published, any keeper or participant can submit the
-Drand signature, reveal valid bids, clear the auction, pay the operator from
-winner escrow, and refund losing escrow.
+The first contract operation checks the RPC network passphrase and verifies
+that the contract exists on that network. A configuration mismatch fails before
+simulation, signing, or submission.
 
-## Preflight simulation
+## Asset auction
 
-Before signing and submitting a state-changing call, integrators can simulate
-the transaction against Soroban RPC to see whether it is likely to succeed:
+Use `Auction` when the round must atomically exchange a payment asset for a lot
+asset.
 
 ```ts
-const preflight = await client.preflightCommit({
+import {
+  createAssetAuctionRound,
+  sealAssetBid,
+  SubRosaClient,
+} from "@sub-rosa/sdk";
+
+const roundId = await createAssetAuctionRound(client, {
+  itemRef,
+  paymentAsset: usdcSac,
+  lotAsset: collectibleSac,
+  lotAmount: 1n,
+  revealRound,
+  commitDeadline,
+  revealDeadline,
+  auditorPubkey,
+});
+
+const sealed = await sealAssetBid({
+  round: Number(revealRound),
+  drand,
+  amount: 700n,
+});
+
+await client.submitV2({ roundId, sealed, escrow: 1_000n });
+```
+
+The seller authorizes lot custody at round creation. Bidders authorize their
+escrow caps when submitting. Settlement transfers the winning amount to the
+seller, returns the winner's unused escrow, refunds losers, and transfers the
+lot to the winner.
+
+## Sealed proposal
+
+Use `ReceiptOnly` when a partner needs confidential structured proposals and a
+verifiable simultaneous reveal without asset custody.
+
+```ts
+import {
+  createSealedProposalRound,
+  sealProposal,
+} from "@sub-rosa/sdk";
+
+const roundId = await createSealedProposalRound(client, {
+  itemRef,
+  revealRound,
+  commitDeadline,
+  revealDeadline,
+  auditorPubkey,
+});
+
+const sealed = await sealProposal({
+  round: Number(revealRound),
+  drand,
+  price: 2_500n,
+  proposal: {
+    timelineDays: 14,
+    approach: "manual and automated Soroban review",
+  },
+});
+
+await client.submitV2({ roundId, sealed, escrow: 0n });
+```
+
+The partner remains responsible for comparing proposals and choosing a provider.
+The round proves the submission set and reveal timing; it does not claim to
+make the business decision on-chain.
+
+## Preflight
+
+Every state-changing Core v2 operation has a matching preflight method. Use it
+before asking a wallet to sign:
+
+```ts
+const result = await client.preflightSubmitV2({
   roundId,
   sealed,
   escrow,
 });
 
-if (!preflight.ok) {
-  if (preflight.error.kind === "contract_error") {
-    console.error(
-      "Contract rejected commit:",
-      preflight.error.contractErrorMessage,
-    );
-  } else {
-    console.error("Preflight failed:", preflight.error.message);
-  }
+if (!result.ok) {
+  console.error(result.error.kind, result.error.message);
   return;
 }
 
-console.log("Estimated fee (stroops):", preflight.fee.transactionFee);
-console.log("Min resource fee:", preflight.fee.minResourceFee?.toString());
-
-await client.commit({ roundId, sealed, escrow });
+await client.submitV2({ roundId, sealed, escrow });
 ```
 
-Each mutating `SubRosaClient` method has a matching `preflight*` helper:
+Preflight results expose transaction fee estimates, Soroban resources, typed
+RPC failures, and decoded contract errors where available.
 
-| Submit | Preflight |
-| --- | --- |
-| `createRound` | `preflightCreateRound` |
-| `commit` | `preflightCommit` |
-| `openReveal` | `preflightOpenReveal` |
-| `reveal` | `preflightReveal` |
-| `clear` | `preflightClear` |
-| `settle` | `preflightSettle` |
-| `void` | `preflightVoid` |
+## Read-only access
 
-Preflight results include:
+Public round state does not require a wallet. Configure `SubRosaClient` without
+a secret key and use round reads or the keeper status client for partner UI,
+monitoring, and receipt pages.
 
-- `ok` — whether simulation indicates the call would succeed
-- `fee` — estimated transaction and minimum resource fees when available
-- `resources` — CPU/memory footprint estimates when available
-- `error` — typed `SubRosaPreflightError` for RPC failures, simulation errors,
-  expired contract state, or decoded Round contract error codes
+## Keeper
 
-Existing submit methods are unchanged; preflight is optional and does not
-require live signing credentials beyond a source `publicKey` (or `secretKey`).
-
-## Auditor identity recovery CLI
-
-For pilots that need machine-readable selective-disclosure evidence, recover
-bidder identities from auditor blobs with:
+After Drand round `R`, any account can advance the permissionless lifecycle.
+Production pilots should still run a keeper for predictable liveness:
 
 ```bash
-pnpm --filter @sub-rosa/tlock recover:identities -- \
-  --auditor-secret-hex <32-byte-hex> \
-  --input-json '{"auditor":{"blobs":{"agent-alpha":"<blob-hex>"}}}'
+pnpm keeper:watch
 ```
 
-Hex-only input (single blob):
+The keeper opens reveal, submits valid payloads, clears the round, settles or
+completes it, and exposes health/status data. It cannot decrypt payloads before
+Drand publishes `R` and does not need participant secret keys.
 
-```bash
-pnpm --filter @sub-rosa/tlock recover:identities -- \
-  --auditor-secret-hex <32-byte-hex> \
-  --blob-hex <blob-hex> \
-  --label agent-alpha
-```
+## Errors and receipts
 
-Canonical trace JSON is supported as well, including shapes like
-`{"trace":{"auditor":{"blobs":{...}}}}` and
-`{"auditor":{"blobs":{...}}}` exported from lifecycle/agent fixtures.
+- Contract errors: [contracts/round/ERRORS.md](../contracts/round/ERRORS.md)
+- Receipt schema: [RECEIPTS.md](./RECEIPTS.md)
+- Threat model: [THREAT_MODEL.md](./THREAT_MODEL.md)
+- Current production limits: [LIMITATIONS.md](./LIMITATIONS.md)
 
-Output is JSON and always includes per-blob rows with either recovered identity
-or an error. Invalid required inputs return `{ "ok": false, ... }` and exit
-non-zero.
-
-## Primary use case
-
-The focused integration target is an escrow-backed sealed auction:
-
-- bids remain unreadable before close;
-- the winning bid is paid from escrow;
-- losers are refunded deterministically;
-- the operator cannot read bids early or choose who settles;
-- the final receipt is public and verifiable.
-
-Future templates can adapt the same primitive to grants, judging, RFPs, DAO
-polls, or allocation workflows, but those do not lead the current SCF
-resubmission.
-
-## Hosted vs embedded
-
-| Mode | Who uses it | Notes |
-| --- | --- | --- |
-| Embedded SDK | Stellar app developers | App owns UI and user flow |
-| Hosted keeper | Apps that want liveness without running ops | Keeper cannot read early values; it only opens after R |
-| Demo frontend | Reviewers, pilots, onboarding | Shows the primitive working end-to-end |
-
-## Trust model
-
-Sub Rosa does not ask integrators to trust a reveal operator. Before Drand R,
-values are timelock-encrypted. After R, the Drand BLS signature is public and
-the Soroban contract verifies it before opening reveal.
-
-## Contract error codes
-
-Every failure mode from the round contract is returned (or reserved) as a
-defined code with no silent fallbacks. When a transaction surfaces a
-`soroban_sdk::Error::Contract(code)`, the canonical mapping — variant name,
-trigger condition, user-facing message, and suggested next action — lives in:
-
-[`contracts/round/ERRORS.md`](../contracts/round/ERRORS.md)
-
-UI layers, receipt exporters, and keeper triage logic should consult that
-table to translate on-chain failures into actionable messages. The contract
-test suite (`cargo test -p sub-rosa-round ::error_codes`) keeps the table in
-lock-step with the exported `Error` enum, so a divergent code is a test
-failure, not a silent docs bug.
+Receipt verification is offline and checks internal consistency. Applications
+that need ledger provenance should also query the configured contract and
+network directly.

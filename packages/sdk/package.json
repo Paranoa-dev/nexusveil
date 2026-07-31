@@ -1,41 +1,70 @@
 {
   "name": "@sub-rosa/sdk",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
-  "description": "SDK for integrating Sub Rosa sealed coordination rounds into Stellar and Soroban apps.",
+  "description": "TypeScript SDK for integrating Sub Rosa sealed auctions and receipt-only proposal rounds on Stellar.",
   "keywords": [
     "stellar",
     "soroban",
     "privacy",
-    "commit-reveal",
     "drand",
     "sealed-auctions",
-    "coordination"
+    "timelock-encryption"
   ],
+  "license": "MIT",
+  "homepage": "https://github.com/karagozemin/Sub-Rosa#readme",
+  "bugs": {
+    "url": "https://github.com/karagozemin/Sub-Rosa/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/karagozemin/Sub-Rosa.git",
     "directory": "packages/sdk"
   },
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
     "test": "node --import tsx --test src/client.test.ts src/encoding.test.ts src/errors.test.ts src/ids.test.ts src/mainnet-readiness.test.ts src/network.test.ts src/preflight.test.ts src/public-api-snapshot.test.ts src/redact.test.ts src/templates.test.ts src/verify.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "smoke:v2:testnet": "tsx scripts/v2-testnet-smoke.ts",
     "smoke:v2:auction": "tsx scripts/v2-atomic-auction-smoke.ts"
   },
   "dependencies": {
-    "@openzeppelin/relayer-plugin-channels": "^0.20.0",
+    "@noble/hashes": "^2.2.0",
     "@stellar/stellar-sdk": "^15.1.0",
-    "@sub-rosa/round-bindings": "workspace:*",
-    "@sub-rosa/tlock": "workspace:*"
+    "@sub-rosa/round-bindings": "workspace:^",
+    "@sub-rosa/tlock": "workspace:^"
+  },
+  "peerDependencies": {
+    "@openzeppelin/relayer-plugin-channels": "^0.20.0"
+  },
+  "peerDependenciesMeta": {
+    "@openzeppelin/relayer-plugin-channels": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@openzeppelin/relayer-plugin-channels": "^0.20.0",
     "@types/node": "^25.9.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
