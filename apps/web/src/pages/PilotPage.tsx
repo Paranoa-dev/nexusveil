@@ -1,5 +1,5 @@
 import { Buffer } from "buffer";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getNetworkDetails,
   isConnected,
@@ -77,6 +77,7 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
   const [timelineDays, setTimelineDays] = useState("14");
   const [approach, setApproach] = useState("Manual review, fuzzing, and remediation report");
   const [busy, setBusy] = useState<string | null>(null);
+  const refreshRequest = useRef(0);
   const contract = useWalletContract(address);
   const reader = useReadOnlyContract();
   const revealCountdown = useDrandCountdown(
@@ -125,10 +126,9 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
 
   async function refresh(target = roundId) {
     if (!reader || !target) return;
+    const request = ++refreshRequest.current;
     const tx = await reader.get_round_v2({ round_id: BigInt(target) });
     const nextRound = tx.result.unwrap();
-    setRound(nextRound);
-    setTemplate(nextRound.mode.tag === "Auction" ? "auction" : "proposal");
 
     const revealed = await Promise.all(
       nextRound.bidders.map(async (bidder) => {
@@ -144,10 +144,32 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
         );
       }),
     );
+    if (request !== refreshRequest.current) return;
+
+    setRound(nextRound);
+    setTemplate(nextRound.mode.tag === "Auction" ? "auction" : "proposal");
     setRevealedSubmissions(
       revealed.filter((entry): entry is PilotSubmissionView => entry !== null),
     );
   }
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const nextRoundId = pilotRoundIdFromHash();
+      refreshRequest.current += 1;
+      setRoundId(nextRoundId);
+      setRound(null);
+      setRevealedSubmissions([]);
+      if (reader && nextRoundId) {
+        void refresh(nextRoundId).catch((error) =>
+          toast.push("error", "Round load failed", displayError(error)),
+        );
+      }
+    };
+
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [reader]);
 
   useEffect(() => {
     if (reader && roundId) {
