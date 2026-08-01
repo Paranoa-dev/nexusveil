@@ -50,6 +50,7 @@ dependencies. Integrators normally need only the SDK:
 ```ts
 import {
   createAssetAuctionRound,
+  quicknet,
   sealAssetBid,
   SubRosaClient,
 } from "@sub-rosa/sdk";
@@ -60,6 +61,7 @@ const client = new SubRosaClient({
   contractId,
   secretKey,
 });
+const drand = quicknet();
 
 const roundId = await createAssetAuctionRound(client, {
   itemRef,

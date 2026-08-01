@@ -51,15 +51,22 @@ that amount.
 ```ts
 import {
   createSealedProposalRound,
+  generateAuditorKeypair,
+  quicknet,
+  roundInSeconds,
   sealProposal,
 } from "@sub-rosa/sdk";
+
+const drand = quicknet();
+const revealRound = await roundInSeconds(drand, 5 * 60);
+const auditor = generateAuditorKeypair();
 
 const roundId = await createSealedProposalRound(client, {
   itemRef,
   revealRound,
   commitDeadline,
   revealDeadline,
-  auditorPubkey,
+  auditorPubkey: auditor.publicKey,
   eligibleParticipants: [providerA, providerB], // optional
 });
 
@@ -109,9 +116,10 @@ simulate every state-changing call before signing.
 
 ## Low-level packages
 
-`@sub-rosa/sdk` installs compatible `@sub-rosa/tlock` and
-`@sub-rosa/round-bindings` versions automatically. Install either package
-directly only when building custom crypto, indexing, or contract tooling.
+`@sub-rosa/sdk` exposes the complete partner integration surface and installs
+compatible `@sub-rosa/tlock` and `@sub-rosa/round-bindings` versions
+automatically. Install either package directly only when building custom
+cryptography, indexing, or contract tooling.
 
 ## Security boundary
 

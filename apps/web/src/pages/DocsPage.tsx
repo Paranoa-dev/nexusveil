@@ -83,13 +83,11 @@ const client = new SubRosaClient({
 const auctionCreateCode = `import { createHash } from "node:crypto";
 import {
   createAssetAuctionRound,
-  SubRosaClient,
-} from "@sub-rosa/sdk";
-import {
   generateAuditorKeypair,
   quicknet,
   roundInSeconds,
-} from "@sub-rosa/tlock";
+  SubRosaClient,
+} from "@sub-rosa/sdk";
 
 const drand = quicknet();
 const chain = await drand.chain().info();
@@ -111,8 +109,7 @@ const roundId = await createAssetAuctionRound(sellerClient, {
   eligibleParticipants: collectorAddresses, // omit for an open round
 });`;
 
-const auctionBidCode = `import { sealAssetBid, SubRosaClient } from "@sub-rosa/sdk";
-import { quicknet } from "@sub-rosa/tlock";
+const auctionBidCode = `import { quicknet, sealAssetBid, SubRosaClient } from "@sub-rosa/sdk";
 
 const bidderClient = new SubRosaClient({
   rpcUrl,
@@ -199,7 +196,7 @@ const contract = new RoundContract({
   },
 });`;
 
-const lifecycleCode = `import { fetchRoundSignature, openPayload } from "@sub-rosa/tlock";
+const lifecycleCode = `import { fetchRoundSignature, openPayload } from "@sub-rosa/sdk";
 
 const signature = await fetchRoundSignature(drand, Number(round.reveal_round));
 await keeperClient.openRevealV2(roundId, signature);
@@ -388,7 +385,7 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
           )}
         </div>
         <div className="docs-top-actions">
-          <span className="docs-version">SDK v0.2.0</span>
+          <span className="docs-version">SDK v0.2.1</span>
           <a href="https://github.com/karagozemin/Sub-Rosa" target="_blank" rel="noreferrer"><Code2 size={17} />GitHub</a>
           <a href="#/pilot" target="_blank" rel="noreferrer" className="docs-pilot-link">Open pilot<ArrowRight size={16} /></a>
           <button type="button" className="docs-mobile-menu" onClick={() => setMobileNav((value) => !value)} aria-label="Toggle documentation navigation">
@@ -424,7 +421,7 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
               <button type="button" onClick={() => jump("auction")}><Code2 size={17} />Auction guide</button>
             </div>
             <div className="docs-proof-strip">
-              <div><Package size={18} /><span>Public package</span><strong>@sub-rosa/sdk@0.2.0</strong></div>
+              <div><Package size={18} /><span>Public package</span><strong>@sub-rosa/sdk@0.2.1</strong></div>
               <div><Server size={18} /><span>Live contract</span><strong>Core v2 testnet</strong></div>
               <div><FileCheck2 size={18} /><span>Live proofs</span><strong>Rounds #2 and #3</strong></div>
             </div>
@@ -539,7 +536,7 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
               <div className="head" role="row"><span>Method</span><span>Purpose</span><span>Returns</span></div>
               {API_ROWS.map(([method, purpose, returns]) => <div role="row" key={method}><code>{method}</code><span>{purpose}</span><code>{returns}</code></div>)}
             </div>
-            <div className="docs-package-row"><div><Package size={18} /><span>@sub-rosa/sdk</span><code>0.2.0</code></div><div><Package size={18} /><span>@sub-rosa/tlock</span><code>0.2.0</code></div><div><Package size={18} /><span>@sub-rosa/round-bindings</span><code>0.2.0</code></div></div>
+            <div className="docs-package-row"><div><Package size={18} /><span>@sub-rosa/sdk</span><code>0.2.1</code></div><div><Package size={18} /><span>@sub-rosa/tlock</span><code>0.2.0</code></div><div><Package size={18} /><span>@sub-rosa/round-bindings</span><code>0.2.0</code></div></div>
           </section>
 
           <section className="docs-section" id="errors">

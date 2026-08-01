@@ -182,3 +182,33 @@ export {
   type Status,
   type DataKey,
 } from "@sub-rosa/round-bindings";
+
+// Partner-facing cryptography and Drand helpers. Keep this list explicit so
+// the SDK stays a stable facade without exposing every tlock implementation detail.
+export {
+  generateAuditorKeypair,
+  auditorPublicKey,
+  sealIdentity,
+  openIdentity,
+  quicknet,
+  chainInfo,
+  currentRound,
+  roundInSeconds,
+  fetchRoundBeacon,
+  fetchRoundSignature,
+  QUICKNET_HASH,
+  generateNonce,
+  encodePayloadEnvelope,
+  decodePayloadEnvelope,
+  payloadCommitment,
+  sealPayload,
+  openPayload,
+  PAYLOAD_ENVELOPE_VERSION,
+  PAYLOAD_HEADER_BYTES,
+  MAX_APPLICATION_PAYLOAD_BYTES,
+  type AuditorKeypair,
+  type DrandClient,
+  type PayloadEnvelope,
+  type SealPayloadParams,
+  type SealedPayload,
+} from "@sub-rosa/tlock";

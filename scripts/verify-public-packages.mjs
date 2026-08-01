@@ -60,6 +60,8 @@ try {
       `expected ${packages.length} tarballs, found ${tarballs.length}`,
     );
   }
+  const sdkTarball = tarballs.find((entry) => entry.includes("sub-rosa-sdk"));
+  if (!sdkTarball) throw new Error("missing tarball for @sub-rosa/sdk");
 
   writeFileSync(
     join(consumerDir, "package.json"),
@@ -69,14 +71,9 @@ try {
         version: "1.0.0",
         private: true,
         type: "module",
-        dependencies: Object.fromEntries(
-          packages.map((pkg) => {
-            const slug = pkg.name.replace("@sub-rosa/", "sub-rosa-");
-            const tarball = tarballs.find((entry) => entry.includes(slug));
-            if (!tarball) throw new Error(`missing tarball for ${pkg.name}`);
-            return [pkg.name, `file:${tarball}`];
-          }),
-        ),
+        dependencies: {
+          "@sub-rosa/sdk": `file:${sdkTarball}`,
+        },
       },
       null,
       2,
@@ -85,13 +82,11 @@ try {
 
   writeFileSync(
     join(consumerDir, "verify.mjs"),
-    `import { ASSET_AUCTION_SCHEMA_ID, SubRosaClient } from "@sub-rosa/sdk";\n` +
-      `import { payloadCommitment } from "@sub-rosa/tlock";\n` +
-      `import { Errors } from "@sub-rosa/round-bindings";\n` +
+    `import { ASSET_AUCTION_SCHEMA_ID, RoundErrors, SubRosaClient, openPayload, quicknet } from "@sub-rosa/sdk";\n` +
       `if (!ASSET_AUCTION_SCHEMA_ID || typeof SubRosaClient !== "function") throw new Error("sdk exports missing");\n` +
-      `if (typeof payloadCommitment !== "function") throw new Error("tlock exports missing");\n` +
-      `if (!Errors[1]) throw new Error("bindings exports missing");\n` +
-      `console.log("public package imports verified");\n`,
+      `if (typeof openPayload !== "function" || typeof quicknet !== "function") throw new Error("tlock facade exports missing");\n` +
+      `if (!RoundErrors[1]) throw new Error("bindings facade exports missing");\n` +
+      `console.log("single-package SDK imports verified");\n`,
   );
 
   run(

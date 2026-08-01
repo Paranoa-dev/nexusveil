@@ -10,9 +10,11 @@ the reviewed templates.
 npm install @sub-rosa/sdk
 ```
 
-`@sub-rosa/sdk` depends on version-matched releases of `@sub-rosa/tlock` and
-`@sub-rosa/round-bindings`. Install those packages directly only when using
-their lower-level APIs.
+`@sub-rosa/sdk` exposes the complete partner integration surface, including
+Drand timing, seal/open helpers, auditor keys, and generated contract types. It
+depends on version-matched releases of `@sub-rosa/tlock` and
+`@sub-rosa/round-bindings`; install those packages directly only when building
+custom low-level cryptography or contract tooling.
 
 ## Client configuration
 
@@ -39,9 +41,12 @@ asset.
 ```ts
 import {
   createAssetAuctionRound,
+  quicknet,
   sealAssetBid,
   SubRosaClient,
 } from "@sub-rosa/sdk";
+
+const drand = quicknet();
 
 const roundId = await createAssetAuctionRound(client, {
   itemRef,
