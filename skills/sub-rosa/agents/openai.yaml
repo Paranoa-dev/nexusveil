@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sub Rosa"
+  short_description: "Integrate sealed Stellar auctions and proposals"
+  default_prompt: "Use the Sub Rosa SDK to design, implement, or review a sealed auction or confidential proposal flow on Stellar."
