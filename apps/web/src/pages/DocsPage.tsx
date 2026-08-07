@@ -386,7 +386,7 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
           )}
         </div>
         <div className="docs-top-actions">
-          <span className="docs-version">SDK v0.2.1</span>
+          <span className="docs-version">SDK v0.2.2</span>
           <a href="https://github.com/karagozemin/Sub-Rosa" target="_blank" rel="noreferrer"><Code2 size={17} />GitHub</a>
           <a href="#/pilot" target="_blank" rel="noreferrer" className="docs-pilot-link">Open pilot<ArrowRight size={16} /></a>
           <button type="button" className="docs-mobile-menu" onClick={() => setMobileNav((value) => !value)} aria-label="Toggle documentation navigation">
@@ -422,14 +422,14 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
               <button type="button" onClick={() => jump("auction")}><Code2 size={17} />Auction guide</button>
             </div>
             <div className="docs-proof-strip">
-              <div><Package size={18} /><span>Public package</span><strong>@sub-rosa/sdk@0.2.1</strong></div>
-              <div><Server size={18} /><span>Live contract</span><strong>Core v2 testnet</strong></div>
-              <div><FileCheck2 size={18} /><span>Live proofs</span><strong>Rounds #2 and #3</strong></div>
+              <div><Package size={18} /><span>Public package</span><strong>@sub-rosa/sdk@0.2.2</strong></div>
+              <div><Server size={18} /><span>Live contracts</span><strong>Core v2 mainnet + testnet</strong></div>
+              <div><FileCheck2 size={18} /><span>Live proofs</span><strong>Testnet rounds #2 and #3</strong></div>
             </div>
           </section>
 
           <section className="docs-section" id="quickstart">
-            <SectionHeading eyebrow="Start" title="Quickstart">Install one package, connect to the live testnet contract, and choose a high-level partner template.</SectionHeading>
+            <SectionHeading eyebrow="Start" title="Quickstart">Install one package, connect to the canonical mainnet or testnet contract, and choose a high-level partner template.</SectionHeading>
             <div className="docs-step"><span>1</span><div><h3>Install the SDK</h3><p>The SDK installs compatible tlock and generated binding versions automatically.</p></div></div>
             <CodeBlock code={installCode} label="Terminal" />
             <div className="docs-step"><span>2</span><div><h3>Create a server client</h3><p>Use a funded Stellar signer for writes. Omit `secretKey` and provide `publicKey` for read-only RPC simulation.</p></div></div>
@@ -565,11 +565,11 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
           </section>
 
           <section className="docs-section" id="security">
-            <SectionHeading eyebrow="Trust" title="Security boundary">Use the protocol for testnet pilots today, but preserve the distinction between cryptographic guarantees, operational liveness, and production assurance.</SectionHeading>
+            <SectionHeading eyebrow="Trust" title="Security boundary">Use testnet for pilots and mainnet only with explicit caps, operational controls, and independent review.</SectionHeading>
             <div className="docs-boundary-grid">
               <div><strong>Enforced on-chain</strong><ul><li>Drand BLS signature verification</li><li>Canonical commitment binding</li><li>Fixed escrow and optional allowlist</li><li>Participant and payload bounds</li><li>Atomic Auction settlement and refunds</li></ul></div>
               <div><strong>Operational responsibility</strong><ul><li>Run at least one keeper after R</li><li>Monitor incomplete reveal counts</li><li>Pin network, contract ID, and WASM hash</li><li>Protect server and auditor keys</li><li>Preserve receipts and transaction hashes</li></ul></div>
-              <div><strong>Not claimed</strong><ul><li>No independent funds-handling audit yet</li><li>No private KYC or identity verification</li><li>No atomic reveal-all transaction</li><li>No automatic business decision in ReceiptOnly</li><li>No production mainnet endorsement</li></ul></div>
+              <div><strong>Not claimed</strong><ul><li>No independent mainnet funds-handling endorsement</li><li>No private KYC or identity verification</li><li>No atomic reveal-all transaction</li><li>No automatic business decision in ReceiptOnly</li><li>No guaranteed keeper availability</li></ul></div>
             </div>
           </section>
 
