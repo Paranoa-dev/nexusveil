@@ -16,6 +16,19 @@ Drand: quicknet / bls-unchained-g1-rfc9380
 Treat these as one deployment tuple. Reconfirm them against the project's
 current documentation before a new pilot.
 
+## Current mainnet deployment
+
+```text
+RPC: https://mainnet.sorobanrpc.com
+Network passphrase: Public Global Stellar Network ; September 2015
+Core v2 contract: CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325
+WASM SHA-256: 2c7bc6b4c91940ac185df38a3d0a8532b555140d818df94f03f894e5952ebf42
+Drand: quicknet / bls-unchained-g1-rfc9380
+```
+
+Use `network: "mainnet"` for this canonical tuple. Keep participant and value
+caps until independent funds-handling review is complete.
+
 ## Configure a client
 
 ```ts

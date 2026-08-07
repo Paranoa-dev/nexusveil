@@ -42,19 +42,24 @@ Only if you want **“Poll live contract”** on the deployed site, set these **
 Copy from `apps/web/.env.example`:
 
 ```bash
+VITE_STELLAR_NETWORK=testnet
 VITE_RPC_URL=https://soroban-testnet.stellar.org
 VITE_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
 VITE_CONTRACT_ID=CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV
 ```
 
-**Mainnet example** (live poll against mainnet smoke):
+**Core v2 mainnet example**:
 
 ```bash
-VITE_RPC_URL=https://rpc.ankr.com/stellar_soroban
+VITE_STELLAR_NETWORK=mainnet
+VITE_RPC_URL=https://mainnet.sorobanrpc.com
 VITE_NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015"
-VITE_CONTRACT_ID=CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX
+VITE_CONTRACT_ID=CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325
 VITE_ROUND_ID=1
 ```
+
+Do not use the legacy v1 mainnet proof as the Core v2 UI contract. Named
+network configuration validates this boundary at build time.
 
 Important: Vite only exposes vars prefixed with `VITE_`. They are **public** in the browser bundle — never put secret keys here.
 
@@ -76,9 +81,7 @@ Runs on a server/VM, not in the static site. No `.env` file required — export 
 
 ```bash
 export KEEPER_SECRET="S…"
-export ROUND_CONTRACT_ID="C…"
-export RPC_URL="https://soroban-testnet.stellar.org"
-export NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+export STELLAR_NETWORK=testnet
 export WATCH_POLL_MS=15000
 export WATCH_ROUND_IDS=1
 
@@ -112,13 +115,33 @@ See root `.env.example` for the full keeper variable list.
 Scripts read env at invocation — no `.env` file on disk:
 
 ```bash
-OPERATOR_SECRET=S… pnpm mainnet:deploy
+pnpm mainnet:v2:prepare # local/read-only; sends no transaction
 
-OPERATOR_SECRET=S… \
-ROUND_CONTRACT_ID=CA7KSDEY… \
-RPC_URL=https://rpc.ankr.com/stellar_soroban \
-pnpm mainnet:settle
+MAINNET_CONFIRM=SUB_ROSA_MAINNET OPERATOR_IDENTITY=sub-rosa-mainnet-v2-operator \
+  pnpm mainnet:v2:deploy
+
+MAINNET_CONFIRM=SUB_ROSA_MAINNET \
+  OPERATOR_IDENTITY=sub-rosa-mainnet-v2-operator \
+  BIDDER_IDENTITY=sub-rosa-mainnet-v2-bidder \
+  ROUND_CONTRACT_ID=C… pnpm mainnet:v2:smoke -- --execute
 ```
+
+The named identities can be generated with `stellar keys generate NAME
+--secure-store`. Secure-store identities intentionally do not reveal an `S...`
+secret; these scripts ask Stellar CLI to sign with the Keychain identity
+directly. Headless CI may use `OPERATOR_SECRET` and `BIDDER_SECRET` instead,
+but each role must set exactly one identity or secret source.
+
+```bash
+# Headless CI alternative; inject these from the CI secret store.
+OPERATOR_SECRET=S…
+BIDDER_SECRET=S…
+```
+
+The deployer pays the WASM upload and deployment fees. During the capped smoke,
+the seller/operator pays create and lifecycle calls while the bidder pays its
+commit. The SDK never charges these fees to a Sub Rosa-owned account. Escrow
+and the auction lot are separate from network fees.
 
 E2E scripts (`lifecycle:e2e`, `agents:e2e`) generate ephemeral keys via Stellar CLI — they do not need a root `.env` either.
 
@@ -183,28 +206,43 @@ Running keeper 24/7?
   → KEEPER_SECRET + ROUND_CONTRACT_ID on the server (runtime)
 
 Deploying new contract round?
-  → OPERATOR_SECRET inline for mainnet:deploy / mainnet:settle
+  → mainnet:v2:prepare first; funded signers only for deploy/smoke execution
 ```
 
 ## Mainnet scripts
 
 ```bash
-pnpm mainnet:ready -- --strict       # consolidated read-only readiness
-pnpm mainnet:verify              # read-only — no secrets
-pnpm mainnet:micro               # dry-run checklist
-MAINNET_CONFIRM=SUB_ROSA_MAINNET OPERATOR_SECRET=S… BIDDER_SECRET=S… \
-  pnpm mainnet:micro -- --execute   # optional micro commit (≤1 XLM escrow)
-MAINNET_CONFIRM=SUB_ROSA_MAINNET KEEPER_SECRET=S… ROUND_CONTRACT_ID=C… \
-  pnpm mainnet:settle               # keeper settle (requires readiness + confirm)
+pnpm mainnet:v2:prepare           # build/hash/bindings; 0 transactions
+ROUND_CONTRACT_ID=C… pnpm mainnet:v2:smoke -- --dry-run
+MAINNET_CONFIRM=SUB_ROSA_MAINNET OPERATOR_IDENTITY=sub-rosa-mainnet-v2-operator \
+  pnpm mainnet:v2:deploy          # funded deployment
+MAINNET_CONFIRM=SUB_ROSA_MAINNET \
+  OPERATOR_IDENTITY=sub-rosa-mainnet-v2-operator \
+  BIDDER_IDENTITY=sub-rosa-mainnet-v2-bidder \
+  ROUND_CONTRACT_ID=C… pnpm mainnet:v2:smoke -- --execute
 ```
+
+After deployment, verify the exact on-chain WASM before executing the smoke:
+
+```bash
+ROUND_CONTRACT_ID=CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325 pnpm mainnet:v2:verify
+```
+
+The historical `mainnet:ready`, `mainnet:verify`, `mainnet:micro`, and
+`mainnet:settle` commands target the frozen legacy v1 proof. They are retained
+for backward compatibility. Prefer the explicit `mainnet:legacy:ready`,
+`mainnet:legacy:verify`, `mainnet:legacy:micro`, and `mainnet:legacy:settle`
+names for historical evidence; they are not the Core v2 launch path.
 
 ### Mainnet launch checklist
 
-1. Run `pnpm mainnet:ready -- --strict` (no secrets required for baseline checks).
-2. Run `pnpm mainnet:verify` to confirm settled round 1 matches frozen artifacts.
-3. Optional balance review: `pnpm mainnet:ready -- --with-balances` with funded operator/keeper secrets in env.
-4. For value-moving commands, set `MAINNET_CONFIRM=SUB_ROSA_MAINNET` and re-run readiness implicitly via deploy/micro/settle guards.
-5. After settlement, confirm contract native XLM SAC balance is **0** (settle script enforces this).
+1. Run `pnpm mainnet:v2:prepare`; require the built hash to match the testnet-reviewed Core v2 WASM.
+2. Fund separate mainnet operator and bidder accounts. Keep values capped.
+3. Deploy only with `MAINNET_CONFIRM=SUB_ROSA_MAINNET` and preserve the local deployment artifact.
+4. Set the resulting Core v2 `ROUND_CONTRACT_ID`, run the secrets-free
+   `pnpm mainnet:v2:verify`, then run the smoke dry-run.
+5. Execute the capped lifecycle and publish the six transaction links plus verified receipt.
+6. Promote the address into `SUB_ROSA_DEPLOYMENTS.mainnet` only after independent review of the artifact and evidence.
 
 ## Security
 

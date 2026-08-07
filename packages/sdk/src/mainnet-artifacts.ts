@@ -2,7 +2,7 @@
 export const MAINNET_ARTIFACTS = {
   network: "Stellar Mainnet",
   networkPassphrase: "Public Global Stellar Network ; September 2015",
-  rpcUrl: "https://rpc.ankr.com/stellar_soroban",
+  rpcUrl: "https://mainnet.sorobanrpc.com",
   contractId: "CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX",
   wasmHash: "353915ad440965ea5f8d92fdb8d93cb2e309fb365e68e6762bca7fd6762b30c7",
   settledRoundId: 1,
@@ -15,9 +15,9 @@ export const MAINNET_ARTIFACTS = {
   bidXlm: "1",
   escrowXlm: "5",
   status: "Settled" as const,
-  proofCommand: "pnpm mainnet:verify",
-  deployCommand: "pnpm mainnet:deploy",
-  settleCommand: "pnpm mainnet:settle",
+  proofCommand: "pnpm mainnet:legacy:verify",
+  deployCommand: "historical legacy v1 deployment",
+  settleCommand: "pnpm mainnet:legacy:settle",
   explorerContract:
     "https://stellar.expert/explorer/public/contract/CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX",
 } as const;

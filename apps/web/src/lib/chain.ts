@@ -4,14 +4,22 @@ import {
   signAuthEntry,
   signTransaction,
 } from "@stellar/freighter-api";
-import { RoundContract, SubRosaClient } from "@sub-rosa/sdk";
+import {
+  RoundContract,
+  SubRosaClient,
+  transactionExplorerUrl,
+} from "@sub-rosa/sdk";
 import { useMemo } from "react";
+import { resolvePublicNetworkConfig } from "./config";
 
 export const LOGO_SRC = "/sub-rosa-logo.png";
-export const RPC_URL = import.meta.env.VITE_RPC_URL ?? "https://soroban-testnet.stellar.org";
-export const NETWORK =
-  import.meta.env.VITE_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015";
-export const CONTRACT_ID = import.meta.env.VITE_CONTRACT_ID;
+const PUBLIC_NETWORK_CONFIG = resolvePublicNetworkConfig();
+export const STELLAR_NETWORK = PUBLIC_NETWORK_CONFIG.network;
+export const RPC_URL = PUBLIC_NETWORK_CONFIG.rpcUrl;
+export const NETWORK = PUBLIC_NETWORK_CONFIG.networkPassphrase;
+export const CONTRACT_ID = PUBLIC_NETWORK_CONFIG.contractId;
+export const NETWORK_LABEL =
+  STELLAR_NETWORK === "mainnet" ? "Stellar Mainnet" : "Stellar Testnet";
 export const ESCROW_TOKEN_LABEL = import.meta.env.VITE_ESCROW_TOKEN_LABEL ?? "token";
 export const DEFAULT_ROUND_ID = import.meta.env.VITE_ROUND_ID
   ? BigInt(import.meta.env.VITE_ROUND_ID)
@@ -77,8 +85,7 @@ export async function sha256Bytes(text: string): Promise<Uint8Array> {
 }
 
 export function stellarExpertTxLink(hash: string): string {
-  const network = NETWORK.includes("Public") ? "public" : "testnet";
-  return `https://stellar.expert/explorer/${network}/tx/${hash}`;
+  return transactionExplorerUrl(STELLAR_NETWORK, hash);
 }
 
 export function useWalletContract(address: string | null) {

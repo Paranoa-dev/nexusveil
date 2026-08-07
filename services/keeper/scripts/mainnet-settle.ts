@@ -16,7 +16,7 @@ import { quicknet } from "@sub-rosa/tlock";
 
 import { closeRound, keepRound } from "../src/keeper.js";
 
-const RPC_URL = process.env.RPC_URL ?? "https://rpc.ankr.com/stellar_soroban";
+const RPC_URL = process.env.RPC_URL ?? "https://mainnet.sorobanrpc.com";
 const NETWORK =
   process.env.NETWORK_PASSPHRASE ??
   "Public Global Stellar Network ; September 2015";

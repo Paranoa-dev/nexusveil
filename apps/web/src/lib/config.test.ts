@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { normalizeUrl, validatePublicConfig } from "./config";
+import {
+  normalizeUrl,
+  resolvePublicNetworkConfig,
+  validatePublicConfig,
+} from "./config";
 
 const VALID_ENV: Record<string, string> = {
   VITE_RPC_URL: "https://custom-soroban.example.com",
@@ -115,6 +119,47 @@ test("official Stellar testnet public config is valid", () => {
     VITE_CONTRACT_ID: "CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV",
   });
   assert.equal(issues.length, 0);
+});
+
+test("named testnet resolves the official Core v2 deployment", () => {
+  const resolved = resolvePublicNetworkConfig({
+    VITE_STELLAR_NETWORK: "testnet",
+  });
+  assert.equal(resolved.network, "testnet");
+  assert.equal(
+    resolved.contractId,
+    "CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV",
+  );
+  assert.equal(validatePublicConfig({ VITE_STELLAR_NETWORK: "testnet" }).length, 0);
+});
+
+test("named mainnet resolves the official Core v2 deployment", () => {
+  const resolved = resolvePublicNetworkConfig({
+    VITE_STELLAR_NETWORK: "mainnet",
+  });
+  assert.equal(resolved.network, "mainnet");
+  assert.equal(
+    resolved.contractId,
+    "CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325",
+  );
+  assert.equal(validatePublicConfig({ VITE_STELLAR_NETWORK: "mainnet" }).length, 0);
+});
+
+test("named network rejects a conflicting passphrase", () => {
+  const issues = validatePublicConfig({
+    VITE_STELLAR_NETWORK: "mainnet",
+    VITE_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
+    VITE_CONTRACT_ID: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+  });
+  assert.ok(issues.some((issue) => issue.key === "VITE_NETWORK_PASSPHRASE"));
+});
+
+test("legacy v1 mainnet proof is not accepted as a Core v2 web deployment", () => {
+  const issues = validatePublicConfig({
+    VITE_STELLAR_NETWORK: "mainnet",
+    VITE_CONTRACT_ID: "CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX",
+  });
+  assert.ok(issues.some((issue) => issue.message.includes("legacy v1")));
 });
 
 

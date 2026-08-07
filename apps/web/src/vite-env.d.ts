@@ -3,6 +3,7 @@
 declare module "process/browser";
 
 interface ImportMetaEnv {
+  readonly VITE_STELLAR_NETWORK?: "testnet" | "mainnet";
   readonly VITE_RPC_URL?: string;
   readonly VITE_NETWORK_PASSPHRASE?: string;
   readonly VITE_CONTRACT_ID?: string;

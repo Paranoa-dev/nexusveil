@@ -9,6 +9,8 @@ import { Keypair, rpc } from "@stellar/stellar-sdk";
 import type {
   AssembledTransaction,
   Result,
+  SignAuthEntry,
+  SignTransaction,
 } from "@stellar/stellar-sdk/contract";
 import { basicNodeSigner } from "@stellar/stellar-sdk/contract";
 import {
@@ -52,14 +54,20 @@ import {
 } from "./errors.js";
 import { normalizeRoundId, normalizeSorobanContractId } from "./ids.js";
 import { validateContractNetwork } from "./network.js";
+import {
+  resolveSubRosaDeployment,
+  type SubRosaNetwork,
+} from "./deployments.js";
 
 export interface SubRosaClientConfig {
+  /** Named Stellar network. Supplies the canonical RPC, passphrase, and deployment. */
+  network?: SubRosaNetwork;
   /** Soroban RPC endpoint, e.g. https://soroban-testnet.stellar.org */
-  rpcUrl: string;
+  rpcUrl?: string;
   /** Network passphrase the contract is deployed on. */
-  networkPassphrase: string;
+  networkPassphrase?: string;
   /** Deployed Round contract id (C…). */
-  contractId: string;
+  contractId?: string;
   /**
    * Secret key (S…) of the account that signs and pays for state-changing
    * calls. Required for create_round/commit/open_reveal/reveal/clear/settle/void.
@@ -71,6 +79,10 @@ export interface SubRosaClientConfig {
    * `secretKey` is given. Ignored when `secretKey` is provided.
    */
   publicKey?: string;
+  /** Wallet adapter compatible with Freighter's signTransaction API. */
+  signTransaction?: SignTransaction;
+  /** Wallet adapter for Soroban authorization entries when required. */
+  signAuthEntry?: SignAuthEntry;
   /** Allow http RPC URLs (e.g. a local quickstart node). Default: false. */
   allowHttp?: boolean;
   /** Optional external submitter. Direct Soroban RPC remains the default. */
@@ -285,11 +297,29 @@ export class SubRosaClient {
   readonly #confirmTimeout: number;
   readonly #pollInterval: number;
   readonly #server: rpc.Server;
+  readonly #submittedTransactionHashes: string[] = [];
   #networkValidation?: Promise<void>;
 
   constructor(config: SubRosaClientConfig) {
+    const resolved = config.network
+      ? resolveSubRosaDeployment(config.network, {
+          contractId: config.contractId,
+          rpcUrl: config.rpcUrl,
+          networkPassphrase: config.networkPassphrase,
+        })
+      : {
+          rpcUrl: config.rpcUrl?.trim(),
+          networkPassphrase: config.networkPassphrase?.trim(),
+          contractId: config.contractId?.trim(),
+        };
+    if (!resolved.rpcUrl || !resolved.networkPassphrase || !resolved.contractId) {
+      throw new SubRosaClientConfigError(
+        "provide network=\"testnet\"|\"mainnet\", or provide rpcUrl, networkPassphrase, and contractId together",
+      );
+    }
+
     const allowHttp = config.allowHttp ?? false;
-    if (/^http:\/\//i.test(config.rpcUrl) && !allowHttp) {
+    if (/^http:\/\//i.test(resolved.rpcUrl) && !allowHttp) {
       throw new SubRosaClientConfigError(
         "rpcUrl must use https unless allowHttp is explicitly enabled",
       );
@@ -309,31 +339,45 @@ export class SubRosaClient {
       );
     }
 
+    if (config.secretKey && (config.signTransaction || config.signAuthEntry)) {
+      throw new SubRosaClientConfigError(
+        "provide either secretKey or wallet signing callbacks, not both",
+      );
+    }
+    if ((config.signTransaction || config.signAuthEntry) && !config.publicKey) {
+      throw new SubRosaClientConfigError(
+        "publicKey is required when wallet signing callbacks are provided",
+      );
+    }
+
     const keypair = config.secretKey
       ? Keypair.fromSecret(config.secretKey)
       : undefined;
     const source = keypair?.publicKey() ?? config.publicKey;
-    const signer = keypair
-      ? basicNodeSigner(keypair, config.networkPassphrase)
+    const nodeSigner = keypair
+      ? basicNodeSigner(keypair, resolved.networkPassphrase)
       : undefined;
+    const signTransaction = nodeSigner?.signTransaction ?? config.signTransaction;
+    const signAuthEntry = nodeSigner?.signAuthEntry ?? config.signAuthEntry;
 
-    this.contractId = normalizeSorobanContractId(config.contractId);
-    this.networkPassphrase = config.networkPassphrase;
+    this.contractId = normalizeSorobanContractId(resolved.contractId);
+    this.networkPassphrase = resolved.networkPassphrase;
     this.#source = source;
-    this.#rpcUrl = config.rpcUrl;
+    this.#rpcUrl = resolved.rpcUrl;
     this.#allowHttp = allowHttp;
     this.#submitter = config.submitter;
     this.#confirmTimeout = confirmTimeout;
     this.#pollInterval = pollInterval;
-    this.#server = config._server ?? new rpc.Server(config.rpcUrl, { allowHttp });
+    this.#server = config._server ?? new rpc.Server(resolved.rpcUrl, { allowHttp });
     if (config._sleep) this.#sleep = config._sleep;
     this.contract = new RoundContract({
       contractId: this.contractId,
-      networkPassphrase: config.networkPassphrase,
-      rpcUrl: config.rpcUrl,
+      networkPassphrase: resolved.networkPassphrase,
+      rpcUrl: resolved.rpcUrl,
       allowHttp,
       ...(source ? { publicKey: source } : {}),
-      ...(signer ? { signTransaction: signer.signTransaction } : {}),
+      ...(signTransaction ? { signTransaction } : {}),
+      ...(signAuthEntry ? { signAuthEntry } : {}),
       server: this.#server,
     });
   }
@@ -342,6 +386,11 @@ export class SubRosaClient {
    *  for argument/return encoding. Exposed for offline encoding checks. */
   get spec() {
     return this.contract.spec;
+  }
+
+  /** Successful state-changing transactions submitted by this client instance. */
+  get submittedTransactionHashes(): readonly string[] {
+    return [...this.#submittedTransactionHashes];
   }
 
   #requireSource(role: string): string {
@@ -372,7 +421,10 @@ export class SubRosaClient {
     if (!this.#submitter) {
       try {
         const sent = await tx.signAndSend();
-        return sent.result.unwrap();
+        const result = sent.result.unwrap();
+        const hash = sent.sendTransactionResponse?.hash;
+        if (hash) this.#submittedTransactionHashes.push(hash);
+        return result;
       } catch (e) {
         throw new SubRosaSubmitError("direct RPC submission failed", { cause: e });
       }
@@ -412,7 +464,9 @@ export class SubRosaClient {
         if (!("returnValue" in res) || !res.returnValue) {
           throw new SubRosaMissingReturnValueError(submitted.hash);
         }
-        return tx.options.parseResultXdr(res.returnValue).unwrap();
+        const result = tx.options.parseResultXdr(res.returnValue).unwrap();
+        this.#submittedTransactionHashes.push(submitted.hash);
+        return result;
       }
       if (res.status !== rpc.Api.GetTransactionStatus.NOT_FOUND) {
         throw new SubRosaTransactionError(submitted.hash, res.status);

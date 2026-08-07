@@ -43,6 +43,30 @@ function assertConfigError(
 }
 
 describe("SubRosaClient network configuration", () => {
+  it("constructs from the official testnet preset", () => {
+    const client = new SubRosaClient({
+      network: "testnet",
+      _server: BASE_CONFIG._server,
+    });
+    assert.equal(
+      client.contractId,
+      "CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV",
+    );
+    assert.equal(client.networkPassphrase, BASE_CONFIG.networkPassphrase);
+  });
+
+  it("constructs from the official mainnet Core v2 preset", () => {
+    const client = new SubRosaClient({ network: "mainnet" });
+    assert.equal(
+      client.contractId,
+      "CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325",
+    );
+    assert.equal(
+      client.networkPassphrase,
+      "Public Global Stellar Network ; September 2015",
+    );
+  });
+
   it("rejects an HTTP RPC URL with a typed error by default", () => {
     assertConfigError(
       () =>
@@ -133,7 +157,68 @@ describe("SubRosaClient network configuration", () => {
   });
 });
 
+describe("SubRosaClient transaction evidence", () => {
+  it("records hashes for successful direct RPC submissions", async () => {
+    const client = new SubRosaClient({
+      ...BASE_CONFIG,
+      publicKey: PUBLIC_KEY,
+    });
+    Object.defineProperty(client.contract, "clear", {
+      configurable: true,
+      value: async () => ({
+        async signAndSend() {
+          return {
+            result: { unwrap: () => undefined },
+            sendTransactionResponse: { hash: "abc123" },
+          };
+        },
+      }),
+    });
+
+    await client.clear(1);
+    assert.deepEqual(client.submittedTransactionHashes, ["abc123"]);
+    assert.notEqual(
+      client.submittedTransactionHashes,
+      client.submittedTransactionHashes,
+    );
+  });
+});
+
 describe("SubRosaClient source configuration", () => {
+  it("accepts wallet signing adapters with their public source", () => {
+    const signTransaction = async () => ({ signedTxXdr: "AAAA" });
+    const signAuthEntry = async () => ({ signedAuthEntry: "BBBB" });
+    const client = new SubRosaClient({
+      ...BASE_CONFIG,
+      publicKey: PUBLIC_KEY,
+      signTransaction,
+      signAuthEntry,
+    });
+    assert.equal(client.contract.options.signTransaction, signTransaction);
+    assert.equal(client.contract.options.signAuthEntry, signAuthEntry);
+  });
+
+  it("rejects ambiguous or source-less wallet signing configuration", () => {
+    assertConfigError(
+      () =>
+        new SubRosaClient({
+          ...BASE_CONFIG,
+          signTransaction: async () => ({ signedTxXdr: "AAAA" }),
+        }),
+      /publicKey is required/,
+    );
+    assertConfigError(
+      () =>
+        new SubRosaClient({
+          ...BASE_CONFIG,
+          secretKey:
+            "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          signTransaction: async () => ({ signedTxXdr: "AAAA" }),
+        }),
+      /either secretKey or wallet signing callbacks/,
+    );
+  });
+
   it("rejects createRound without an operator source using a typed error", async () => {
     const client = new SubRosaClient(BASE_CONFIG);
 

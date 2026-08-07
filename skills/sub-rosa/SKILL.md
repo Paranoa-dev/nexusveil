@@ -1,13 +1,13 @@
 ---
 name: sub-rosa
-description: Integrate Sub Rosa sealed coordination into Stellar applications with @sub-rosa/sdk. Use when building sealed-bid asset auctions, confidential proposal or procurement rounds, Drand-timed reveal, SAC escrow and atomic lot settlement, permissionless round keepers, Core v2 receipts, or a Sub Rosa testnet pilot. Also use when choosing between Auction and ReceiptOnly, wiring Stellar wallets, or reviewing a Sub Rosa lifecycle and security boundary.
+description: Integrate Sub Rosa sealed coordination into Stellar applications with @sub-rosa/sdk. Use when building sealed-bid asset auctions, confidential proposal or procurement rounds, Drand-timed reveal, SAC escrow and atomic lot settlement, permissionless round keepers, Core v2 receipts, or a Sub Rosa testnet or capped-mainnet pilot. Also use when choosing between Auction and ReceiptOnly, wiring Stellar wallets, or reviewing a Sub Rosa lifecycle and security boundary.
 ---
 
 # Sub Rosa
 
 Build or review an integration against Sub Rosa Core v2. Prefer the public
-`@sub-rosa/sdk` templates over custom contract calls. Keep the current testnet
-and audit boundary explicit.
+`@sub-rosa/sdk` templates over custom contract calls. Keep the current network,
+deployment, and audit boundary explicit.
 
 ## Integration workflow
 
@@ -105,11 +105,11 @@ and audit boundary explicit.
 
 ## Required safety language
 
-Sub Rosa Core v2 has settled testnet proofs but no independent funds-handling
-audit. Describe it as testnet pilot infrastructure. Do not claim that the SDK,
-the hosted UI, or the legacy v1 mainnet smoke proves Core v2 is production-safe.
-Use participant and value caps until the contract deployment is independently
-reviewed.
+Sub Rosa Core v2 has settled testnet proofs and an official capped-mainnet
+deployment, but no independent funds-handling audit yet. Do not claim that the
+SDK, the hosted UI, or the legacy v1 mainnet smoke proves Core v2 is
+production-safe. Use participant and value caps until the deployment is
+independently reviewed.
 
 ## Sources
 

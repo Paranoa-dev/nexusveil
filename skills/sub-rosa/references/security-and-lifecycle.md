@@ -55,8 +55,8 @@ assurance:
 
 ## Current assurance statement
 
-Core v2 has settled testnet proofs. It has not received an independent
-funds-handling audit. The legacy v1 mainnet settlement is protocol evidence,
-not a Core v2 production deployment. Keep pilots on testnet with explicit
-participant and value caps until deployment review, operational monitoring,
-and an independent audit are complete.
+Core v2 has settled testnet proofs and an official, hash-pinned capped-mainnet
+deployment. It has not received an independent funds-handling audit. The
+legacy v1 mainnet settlement is protocol evidence, not a Core v2 production
+deployment. Keep pilots explicitly capped until deployment review, operational
+monitoring, and an independent audit are complete.

@@ -22,16 +22,23 @@ custom low-level cryptography or contract tooling.
 import { SubRosaClient } from "@sub-rosa/sdk";
 
 const client = new SubRosaClient({
-  rpcUrl: "https://soroban-testnet.stellar.org",
-  networkPassphrase: "Test SDF Network ; September 2015",
-  contractId: process.env.ROUND_CONTRACT_ID!,
+  network: "testnet",
   publicKey: process.env.STELLAR_PUBLIC_KEY,
 });
 ```
 
+For Core v2 mainnet, switch to `network: "mainnet"` to use the canonical
+deployment. An explicit reviewed `contractId` can still override the preset;
+the legacy v1 mainnet proof is not a Core v2 default.
+
 The first contract operation checks the RPC network passphrase and verifies
 that the contract exists on that network. A configuration mismatch fails before
 simulation, signing, or submission.
+
+The account signing each write pays that Stellar transaction's fee. The SDK
+never draws fees from a Sub Rosa account. A seller, bidder, or keeper therefore
+pays only the calls it submits unless an application explicitly configures a
+fee-sponsoring relayer. Contract escrow is separate from network fees.
 
 ## Asset auction
 

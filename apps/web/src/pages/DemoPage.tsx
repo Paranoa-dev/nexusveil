@@ -17,6 +17,7 @@ import { DEMO_TRACE } from "../demo/trace";
 import {
   COMMIT_DURATION_PRESETS,
   CONTRACT_ID,
+  NETWORK_LABEL,
   DEFAULT_COMMIT_DURATION_SECONDS,
   DEFAULT_ROUND_ID,
   formatDemoAmount,
@@ -139,7 +140,7 @@ function PhaseGuide(props: {
   let tone = "idle";
   let eyebrow = "Next step";
   let title = "Connect Freighter";
-  let detail = "Use a funded Stellar testnet wallet to run a sealed round end-to-end.";
+  let detail = `Use a funded ${NETWORK_LABEL} wallet to run a sealed round end-to-end.`;
   let timerLabel = "Status";
   let timerValue = "ready";
   let ctaLabel = "Connect Freighter";

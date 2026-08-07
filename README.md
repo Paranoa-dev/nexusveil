@@ -56,9 +56,7 @@ import {
 } from "@sub-rosa/sdk";
 
 const client = new SubRosaClient({
-  rpcUrl,
-  networkPassphrase,
-  contractId,
+  network: "testnet",
   secretKey,
 });
 const drand = quicknet();
@@ -83,6 +81,12 @@ const sealed = await sealAssetBid({
 
 await client.submitV2({ roundId, sealed, escrow: 1_000n }); // must equal fixedEscrow
 ```
+
+Switch to `network: "mainnet"` to use the canonical Core v2 deployment on the
+Stellar public network. An explicit reviewed `contractId` remains supported
+for caller-owned deployments. The signer supplied by the integrator pays each
+submitted transaction's network fee; Sub Rosa does not subsidize SDK calls by
+default.
 
 See [packages/sdk/README.md](./packages/sdk/README.md) for both integration
 templates and [docs/INTEGRATION.md](./docs/INTEGRATION.md) for lifecycle,
@@ -127,8 +131,18 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system boundaries and
 | Asset | Native XLM SAC |
 | Scope | Legacy v1 settlement smoke, not a Core v2 production deployment |
 
-Core v2 is testnet software. Funds-handling contracts require independent review
-before a production or uncapped mainnet integration.
+### Core v2 mainnet
+
+| Field | Value |
+| --- | --- |
+| WASM hash | `2c7bc6b4c91940ac185df38a3d0a8532b555140d818df94f03f894e5952ebf42` |
+| SDK support | `network: "mainnet"` with an explicit reviewed Core v2 contract ID |
+| Official deployment | `CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325` |
+| Safety | Mainnet writes require an explicit confirmation phrase and micro-value caps |
+
+Core v2 has verified testnet proofs and a capped Core v2 mainnet deployment.
+Funds-handling contracts require independent review before a production or
+uncapped mainnet integration.
 
 ## Monorepo
 

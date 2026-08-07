@@ -48,8 +48,8 @@ Minimum flow:
    winner.
 6. Losing escrow is refunded and the final receipt is published.
 
-The first pilot remains on testnet. Mainnet requires independent contract
-review and explicit value caps.
+The first pilot can use the capped Core v2 mainnet deployment after independent
+contract review and explicit value caps.
 
 ## Evidence record
 

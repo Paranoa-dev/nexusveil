@@ -401,7 +401,7 @@ async function main() {
         clearingRule: "HighestBid",
         recordedAt: generatedAt,
         roundStatus: "Settled",
-        liveE2e: ["pnpm agents:e2e", "pnpm mainnet:verify"],
+        liveE2e: ["pnpm agents:e2e", "pnpm mainnet:legacy:verify"],
         proofScope:
           "Single canonical testnet run: 2 mandated agents, x402 appraisal, sealed commits, permissionless keeper reveal, clear, settle → contract 0 USDC.",
       },

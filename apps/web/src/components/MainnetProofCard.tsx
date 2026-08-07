@@ -55,7 +55,7 @@ export function MainnetProofCard() {
             <li>
               <strong>Dry-run checklist</strong>
               <span>
-                <code>pnpm mainnet:micro</code>
+                <code>pnpm mainnet:legacy:micro</code>
               </span>
             </li>
             <li>

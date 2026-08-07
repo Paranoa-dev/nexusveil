@@ -9,6 +9,17 @@ pnpm install
 pnpm --filter @sub-rosa/keeper run watch
 ```
 
+Select a canonical network with `STELLAR_NETWORK=testnet|mainnet`. Both named
+networks use their published Core v2 deployment automatically. Set
+`ROUND_CONTRACT_ID` only when overriding the canonical deployment:
+
+```bash
+STELLAR_NETWORK=mainnet KEEPER_SECRET=S… npm run watch
+```
+
+The keeper signer pays the network fees for open, reveal, clear, settle, or
+void transactions it submits. Read-only status calls do not submit transactions.
+
 ## Commands
 
 | Command | Purpose |

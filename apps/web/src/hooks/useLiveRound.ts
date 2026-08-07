@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { Round, BidState } from "@sub-rosa/sdk";
-
-const RPC = import.meta.env.VITE_RPC_URL ?? "https://soroban-testnet.stellar.org";
-const NETWORK =
-  import.meta.env.VITE_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015";
-const CONTRACT = import.meta.env.VITE_CONTRACT_ID as string | undefined;
+import {
+  CONTRACT_ID as CONTRACT,
+  NETWORK,
+  RPC_URL as RPC,
+} from "../lib/chain";
 const ROUND_ID = import.meta.env.VITE_ROUND_ID
   ? BigInt(import.meta.env.VITE_ROUND_ID)
   : undefined;

@@ -126,5 +126,7 @@ delivery and fee sponsorship, not contract authorization or settlement rules.
 - Legacy v1 mainnet settlement proof:
   `CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX`
 
+Core v2 mainnet uses the same reviewed WASM hash and the official capped
+deployment at `CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325`.
 Core v2 is not described as audited production software. See
 [LIMITATIONS.md](./LIMITATIONS.md).

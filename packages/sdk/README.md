@@ -15,18 +15,43 @@ used by their Stellar stack.
 
 ## Network configuration
 
-Configure the RPC URL, network passphrase, and contract ID from the same deployment:
+Use a named network preset for the canonical deployment:
 
 ```ts
 import { SubRosaClient } from "@sub-rosa/sdk";
 
 const client = new SubRosaClient({
-  rpcUrl: "https://soroban-testnet.stellar.org",
-  networkPassphrase: "Test SDF Network ; September 2015",
-  contractId: process.env.ROUND_CONTRACT_ID!,
+  network: "testnet",
   publicKey: process.env.STELLAR_PUBLIC_KEY,
 });
 ```
+
+`network: "mainnet"` selects the official Core v2 deployment on the Stellar
+public network. An explicit `contractId` is still accepted for a caller-owned
+reviewed deployment:
+
+```ts
+const client = new SubRosaClient({
+  network: "mainnet",
+  secretKey: process.env.STELLAR_SECRET_KEY,
+});
+```
+
+Browser integrations pass their wallet source and Freighter-compatible signing
+callbacks instead of a secret key:
+
+```ts
+const client = new SubRosaClient({
+  network: "mainnet",
+  publicKey: walletAddress,
+  signTransaction: wallet.signTransaction,
+  signAuthEntry: wallet.signAuthEntry,
+});
+```
+
+The legacy v1 mainnet proof is never selected as a Core v2 default. Custom RPCs
+remain supported with `rpcUrl`; custom networks can continue to provide the
+full `rpcUrl`, `networkPassphrase`, and `contractId` tuple.
 
 On the first contract call, the client asks the RPC for its actual network
 passphrase and confirms that `contractId` exists on that network. The result is
@@ -34,6 +59,18 @@ cached for later calls. A mismatch throws `SubRosaNetworkMismatchError` before
 simulation, signing, or submission, with the conflicting values and a suggested
 fix. Contract IDs do not encode a Stellar network, so copying a `C...` address
 between Testnet and Mainnet requires updating all three configuration values.
+
+## Fees and signing
+
+The SDK does not charge fees to Sub Rosa. Each state-changing call is paid by
+the transaction source that signs it: the seller pays create/settle calls, each
+bidder pays its submission, and a keeper pays lifecycle calls it submits.
+Escrow and lot assets are contract value, separate from Stellar network fees.
+An optional relayer may sponsor fees, in which case the relayer operator pays.
+Read-only simulation and receipt verification do not submit transactions.
+
+Successful writes are available as `client.submittedTransactionHashes`, which
+lets integrations preserve explorer evidence without parsing logs.
 
 ## Core v2 partner templates
 
@@ -125,5 +162,6 @@ cryptography, indexing, or contract tooling.
 
 The SDK validates configuration and canonical payloads, but it cannot make an
 unknown contract deployment trustworthy. Production applications should pin a
-reviewed network, contract ID, and WASM hash. Core v2 currently has testnet
-proofs and requires independent funds-handling review before mainnet use.
+reviewed network, contract ID, and WASM hash. Core v2 has testnet proofs and an
+official capped-mainnet deployment. It requires independent funds-handling
+review before uncapped mainnet use.

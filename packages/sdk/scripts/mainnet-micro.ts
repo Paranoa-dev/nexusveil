@@ -55,7 +55,7 @@ function printChecklist(bid: bigint, escrow: bigint, execute: boolean) {
   console.log("  [ ] ROUND_CONTRACT_ID points at deployed mainnet Round");
   console.log("  [ ] OPERATOR_SECRET + BIDDER_SECRET funded with XLM for fees");
   console.log("  [ ] Amounts are micro (never testnet 700/459 USDC demo sizes)");
-  console.log("  [ ] Round 1 settled proof already verified via pnpm mainnet:verify");
+  console.log("  [ ] Round 1 settled proof already verified via pnpm mainnet:legacy:verify");
   if (execute) {
     console.log("  [ ] MAINNET_CONFIRM=SUB_ROSA_MAINNET is set");
     console.log("  [ ] --execute flag passed");
@@ -76,7 +76,7 @@ async function main() {
   if (!execute) {
     console.log("DRY-RUN complete. To send txs:");
     console.log("  MAINNET_CONFIRM=SUB_ROSA_MAINNET OPERATOR_SECRET=S… BIDDER_SECRET=S… \\");
-    console.log("    pnpm mainnet:micro -- --execute");
+    console.log("    pnpm mainnet:legacy:micro -- --execute");
     return;
   }
 
@@ -173,7 +173,7 @@ async function main() {
   console.log("   R:       ", revealRound);
   console.log("   bid:     ", (Number(bid) / 1e7).toFixed(7), "XLM");
   console.log("   escrow:  ", (Number(escrow) / 1e7).toFixed(7), "XLM");
-  console.log("\nNext: wait for R, then pnpm mainnet:settle with ROUND_ID=", roundId.toString());
+  console.log("\nNext: wait for R, then pnpm mainnet:legacy:settle with ROUND_ID=", roundId.toString());
 }
 
 main().catch((err) => {

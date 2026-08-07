@@ -74,9 +74,7 @@ const installCode = `npm install @sub-rosa/sdk`;
 const clientCode = `import { SubRosaClient } from "@sub-rosa/sdk";
 
 const client = new SubRosaClient({
-  rpcUrl: "https://soroban-testnet.stellar.org",
-  networkPassphrase: "Test SDF Network ; September 2015",
-  contractId: "${CONTRACT_ID}",
+  network: "testnet",
   secretKey: process.env.STELLAR_SECRET,
 });`;
 
@@ -455,6 +453,7 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
               <div><span>Drand</span><code>quicknet · bls-unchained-g1-rfc9380</code></div>
             </div>
             <Callout title="Testnet boundary" tone="warning">This deployment has settled live testnet proofs and has not received an independent funds-handling audit. Do not use it for uncapped mainnet value.</Callout>
+            <p className="docs-copy">Use <code>network: "mainnet"</code> for the canonical Core v2 public-network deployment, or pass a reviewed contract override. The signer pays each transaction fee; Sub Rosa does not sponsor SDK writes by default.</p>
           </section>
 
           <section className="docs-section" id="auction">

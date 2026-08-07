@@ -50,8 +50,12 @@ direct ledger query for high-value use.
 
 ## 6. State the boundary
 
-Core v2 has live testnet proofs. The mainnet artifact is a legacy v1 settlement
-proof. Production mainnet use follows an independent funds-handling review.
+Core v2 has live testnet proofs and a verified capped-mainnet deployment. The
+legacy v1 mainnet artifact remains historical evidence; the Core v2 mainnet
+address is canonical. Production or uncapped mainnet use follows an independent
+funds-handling review.
+Production or uncapped mainnet use follows an independent funds-handling
+review.
 
 ## Verification commands
 

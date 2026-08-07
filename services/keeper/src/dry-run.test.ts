@@ -91,6 +91,30 @@ describe("parseKeeperRunConfig", () => {
       /MAX_WAIT_SECONDS must be a non-negative finite number/,
     );
   });
+
+  test("named testnet uses the official Core v2 deployment", () => {
+    const config = parseKeeperRunConfig({
+      STELLAR_NETWORK: "testnet",
+      KEEPER_DRY_RUN: "true",
+    });
+    assert.equal(
+      config.contractId,
+      "CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV",
+    );
+    assert.equal(config.rpcUrl, "https://soroban-testnet.stellar.org");
+  });
+
+  test("named mainnet uses the official Core v2 deployment", () => {
+    const config = parseKeeperRunConfig({
+      STELLAR_NETWORK: "mainnet",
+      KEEPER_DRY_RUN: "true",
+    });
+    assert.equal(
+      config.contractId,
+      "CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325",
+    );
+    assert.equal(config.rpcUrl, "https://mainnet.sorobanrpc.com");
+  });
 });
 
 describe("decideKeeperDryRunAction", () => {

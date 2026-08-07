@@ -69,6 +69,8 @@ describe("check-deploy-docs", () => {
       "KEEPER_SECRET",
       "OPERATOR_SECRET",
       "BIDDER_SECRET",
+      "OPERATOR_IDENTITY",
+      "BIDDER_IDENTITY",
       "ROUND_CONTRACT_ID",
       "FACILITATOR_SECRET",
       "PAY_TO",
@@ -84,11 +86,10 @@ describe("check-deploy-docs", () => {
   it("verifies mainnet scripts and keeper watch command", () => {
     const out = runCheck();
     for (const c of [
-      "pnpm mainnet:ready",
-      "pnpm mainnet:verify",
-      "pnpm mainnet:micro",
-      "pnpm mainnet:deploy",
-      "pnpm mainnet:settle",
+      "pnpm mainnet:v2:prepare",
+      "pnpm mainnet:v2:deploy",
+      "pnpm mainnet:v2:verify",
+      "pnpm mainnet:v2:smoke",
       "pnpm keeper:watch",
       "pnpm agents:e2e",
       "pnpm appraisal:start",

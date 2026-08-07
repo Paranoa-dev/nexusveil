@@ -96,6 +96,8 @@ Engineering output alone is not adoption evidence. Track:
 
 ## Current boundary
 
-Core v2 has public testnet proofs for both templates. The mainnet artifact is a
-legacy v1 settlement proof. No document should describe Core v2 as audited or
-production-ready until an independent funds-handling review is complete.
+Core v2 has public testnet proofs for both templates and a hash-pinned capped
+mainnet deployment. The legacy v1 settlement proof remains historical evidence;
+the Core v2 mainnet address is now canonical. No document should describe Core
+v2 as audited or production-ready until an independent funds-handling review is
+complete.

@@ -1,9 +1,7 @@
 import type { BidState, Round, SubRosaClient } from "@sub-rosa/sdk";
 
 import { VOID_GRACE_SECONDS } from "./keeper.js";
-
-const DEFAULT_RPC_URL = "https://soroban-testnet.stellar.org";
-const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
+import { parseKeeperNetworkConfig } from "./network-config.js";
 
 export interface KeeperRunConfig {
   contractId: string;
@@ -43,15 +41,6 @@ export type KeeperDryRunReader = Pick<
   SubRosaClient,
   "getRound" | "getBidState"
 >;
-
-function requiredEnv(
-  env: Record<string, string | undefined>,
-  name: string,
-): string {
-  const value = env[name]?.trim();
-  if (!value) throw new Error(`missing required env var ${name}`);
-  return value;
-}
 
 function parseBooleanEnv(value: string | undefined, name: string): boolean {
   if (value == null || value.trim() === "") return false;
@@ -95,13 +84,13 @@ export function parseKeeperRunConfig(
       "missing required env var KEEPER_SECRET (not required when KEEPER_DRY_RUN=true)",
     );
   }
+  const network = parseKeeperNetworkConfig(env);
 
   return {
-    contractId: requiredEnv(env, "ROUND_CONTRACT_ID"),
+    contractId: network.contractId,
     roundId: parseRoundId(env.ROUND_ID),
-    rpcUrl: env.RPC_URL?.trim() || DEFAULT_RPC_URL,
-    networkPassphrase:
-      env.NETWORK_PASSPHRASE?.trim() || DEFAULT_NETWORK_PASSPHRASE,
+    rpcUrl: network.rpcUrl,
+    networkPassphrase: network.networkPassphrase,
     dryRun,
     ...(keeperSecret ? { keeperSecret } : {}),
     maxWaitSeconds: parseMaxWaitSeconds(env.MAX_WAIT_SECONDS),

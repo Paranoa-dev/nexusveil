@@ -1,9 +1,9 @@
 // Consolidated mainnet launch readiness — read-only by default.
 //
 // Usage:
-//   pnpm mainnet:ready
-//   pnpm mainnet:ready -- --dry-run
-//   pnpm mainnet:ready -- --with-balances --strict
+//   pnpm mainnet:legacy:ready
+//   pnpm mainnet:legacy:ready -- --dry-run
+//   pnpm mainnet:legacy:ready -- --with-balances --strict
 
 import { Keypair } from "@stellar/stellar-sdk";
 
@@ -78,11 +78,11 @@ async function main() {
 
   console.log("\n✅ MAINNET READINESS OK");
   console.log("Recommended launch checklist:");
-  console.log("  1. pnpm mainnet:ready -- --strict");
-  console.log("  2. pnpm mainnet:verify");
-  console.log("  3. pnpm mainnet:micro            # dry-run");
-  console.log("  4. MAINNET_CONFIRM=SUB_ROSA_MAINNET … pnpm mainnet:micro -- --execute");
-  console.log("  5. MAINNET_CONFIRM=SUB_ROSA_MAINNET … pnpm mainnet:settle");
+  console.log("  1. pnpm mainnet:legacy:ready -- --strict");
+  console.log("  2. pnpm mainnet:legacy:verify");
+  console.log("  3. pnpm mainnet:legacy:micro            # dry-run");
+  console.log("  4. MAINNET_CONFIRM=SUB_ROSA_MAINNET … pnpm mainnet:legacy:micro -- --execute");
+  console.log("  5. MAINNET_CONFIRM=SUB_ROSA_MAINNET … pnpm mainnet:legacy:settle");
 }
 
 main().catch((err) => {

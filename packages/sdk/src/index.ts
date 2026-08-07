@@ -70,6 +70,18 @@ export {
   type ContractNetworkValidationConfig,
   type NetworkValidationServer,
 } from "./network.js";
+export {
+  SUB_ROSA_DEPLOYMENTS,
+  contractExplorerUrl,
+  isSubRosaNetwork,
+  resolveSubRosaDeployment,
+  transactionExplorerUrl,
+  type DeploymentStatus,
+  type ResolveDeploymentOptions,
+  type ResolvedSubRosaDeployment,
+  type SubRosaDeployment,
+  type SubRosaNetwork,
+} from "./deployments.js";
 
 export {
   validateEncryptedBlob,

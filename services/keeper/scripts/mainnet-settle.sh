@@ -7,7 +7,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../../.."
 
-RPC_URL="${RPC_URL:-https://rpc.ankr.com/stellar_soroban}"
+RPC_URL="${RPC_URL:-https://mainnet.sorobanrpc.com}"
 NETWORK_PASSPHRASE="${NETWORK_PASSPHRASE:-Public Global Stellar Network ; September 2015}"
 
 [[ -n "${KEEPER_SECRET:-}" ]] || { echo "error: KEEPER_SECRET required" >&2; exit 1; }

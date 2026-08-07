@@ -7,6 +7,7 @@
 //   KEEPER_DRY_RUN      true prints a read-only preflight summary and exits
 //   KEEPER_SECRET       funded signer secret (S…); not required for dry-run
 //   MAX_WAIT_SECONDS    how long to wait for round R (default 0)
+//   STELLAR_NETWORK     testnet or mainnet; selects canonical network defaults
 //   RPC_URL             default https://soroban-testnet.stellar.org
 //   NETWORK_PASSPHRASE  default testnet
 

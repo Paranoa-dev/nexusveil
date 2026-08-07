@@ -1,0 +1,12 @@
+{
+  "protocolVersion": "core-v2",
+  "network": "mainnet",
+  "networkPassphrase": "Public Global Stellar Network ; September 2015",
+  "rpcUrl": "https://mainnet.sorobanrpc.com",
+  "contractId": "CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325",
+  "wasmHash": "2c7bc6b4c91940ac185df38a3d0a8532b555140d818df94f03f894e5952ebf42",
+  "deployTransactionHash": "349fe1094c544a88a8ad862a26047f4acd537d77a1aef4d14805ad6827768094",
+  "explorerContract": "https://stellar.expert/explorer/public/contract/CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325",
+  "deployedBy": "GDK4THAIVPVLSVGFWYYM7NASDDUWCQMNMXCN4KXILLK6ZWELRB4VCGBY",
+  "deployedAt": "2026-08-07T17:53:23.685Z"
+}
