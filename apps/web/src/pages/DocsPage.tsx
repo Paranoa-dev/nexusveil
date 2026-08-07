@@ -19,9 +19,12 @@ import {
   X,
 } from "lucide-react";
 
+import { SUB_ROSA_DEPLOYMENTS } from "@sub-rosa/sdk";
 import { LOGO_SRC } from "../lib/chain";
 
-const CONTRACT_ID = "CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV";
+const TESTNET_DEPLOYMENT = SUB_ROSA_DEPLOYMENTS.testnet;
+const MAINNET_DEPLOYMENT = SUB_ROSA_DEPLOYMENTS.mainnet;
+const CONTRACT_ID = TESTNET_DEPLOYMENT.contractId;
 const WASM_HASH = "2c7bc6b4c91940ac185df38a3d0a8532b555140d818df94f03f894e5952ebf42";
 
 type SectionLink = { id: string; label: string; keywords: string };
@@ -403,9 +406,9 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
             ))}
           </div>
           <div className="docs-sidebar-foot">
-            <span>Testnet deployment</span>
-            <code>{CONTRACT_ID.slice(0, 9)}...{CONTRACT_ID.slice(-7)}</code>
-            <a href={`https://stellar.expert/explorer/testnet/contract/${CONTRACT_ID}`} target="_blank" rel="noreferrer">View on explorer<ExternalLink size={13} /></a>
+            <span>Mainnet Core v2</span>
+            <code>{MAINNET_DEPLOYMENT.contractId.slice(0, 9)}...{MAINNET_DEPLOYMENT.contractId.slice(-7)}</code>
+            <a href={`https://stellar.expert/explorer/public/contract/${MAINNET_DEPLOYMENT.contractId}`} target="_blank" rel="noreferrer">View on explorer<ExternalLink size={13} /></a>
           </div>
         </aside>
 
@@ -445,12 +448,27 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
 
           <section className="docs-section" id="network">
             <SectionHeading eyebrow="Configuration" title="Network and contract">Pin all three values together. A Stellar contract address does not identify which network it belongs to.</SectionHeading>
-            <div className="docs-kv-table">
-              <div><span>Network</span><code>Test SDF Network ; September 2015</code></div>
-              <div><span>RPC</span><code>https://soroban-testnet.stellar.org</code></div>
-              <div><span>Contract</span><code>{CONTRACT_ID}</code></div>
-              <div><span>WASM SHA-256</span><code>{WASM_HASH}</code></div>
-              <div><span>Drand</span><code>quicknet · bls-unchained-g1-rfc9380</code></div>
+            <div className="docs-mode-grid">
+              <div>
+                <span>Stellar Mainnet</span>
+                <h3>Canonical Core v2</h3>
+                <div className="docs-kv-table">
+                  <div><span>RPC</span><code>{MAINNET_DEPLOYMENT.rpcUrl}</code></div>
+                  <div><span>Contract</span><code>{MAINNET_DEPLOYMENT.contractId}</code></div>
+                  <div><span>WASM SHA-256</span><code>{WASM_HASH}</code></div>
+                </div>
+                <a href={`https://stellar.expert/explorer/public/contract/${MAINNET_DEPLOYMENT.contractId}`} target="_blank" rel="noreferrer">View mainnet contract<ExternalLink size={13} /></a>
+              </div>
+              <div>
+                <span>Stellar Testnet</span>
+                <h3>Live proof deployment</h3>
+                <div className="docs-kv-table">
+                  <div><span>RPC</span><code>{TESTNET_DEPLOYMENT.rpcUrl}</code></div>
+                  <div><span>Contract</span><code>{CONTRACT_ID}</code></div>
+                  <div><span>WASM SHA-256</span><code>{WASM_HASH}</code></div>
+                </div>
+                <a href={`https://stellar.expert/explorer/testnet/contract/${CONTRACT_ID}`} target="_blank" rel="noreferrer">View testnet contract<ExternalLink size={13} /></a>
+              </div>
             </div>
             <Callout title="Testnet boundary" tone="warning">This deployment has settled live testnet proofs and has not received an independent funds-handling audit. Do not use it for uncapped mainnet value.</Callout>
             <p className="docs-copy">Use <code>network: "mainnet"</code> for the canonical Core v2 public-network deployment, or pass a reviewed contract override. The signer pays each transaction fee; Sub Rosa does not sponsor SDK writes by default.</p>
