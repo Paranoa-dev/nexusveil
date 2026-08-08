@@ -125,9 +125,11 @@ interface PersistedRoom {
   roundId: string | null;
   transactionHashes?: string[];
   durationPreset?: DealDuration;
+  sampleOffers?: SignalOffer[];
 }
 
 const STORAGE_KEY = "subrosa-signal-pilot-room-v1";
+const ROOMS_STORAGE_KEY = "subrosa-signal-pilot-rooms-v1";
 const SAMPLE_ROOM_ID = "signal-otc-demo";
 
 const DEFAULT_OTC: DealDraft = {
@@ -309,33 +311,57 @@ function createRoom(draft: DealDraft, duration: DealDuration = DEFAULT_DURATION_
   };
 }
 
-function loadRoom(): PersistedRoom {
+function isPersistedRoom(value: unknown): value is PersistedRoom {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<PersistedRoom>;
+  return Boolean(
+    typeof candidate.id === "string" &&
+      candidate.draft &&
+      (candidate.draft.type === "otc" || candidate.draft.type === "loan") &&
+      typeof candidate.createdAt === "number" &&
+      typeof candidate.deadlineAt === "number" &&
+      ["collecting", "ready", "revealed", "selected"].includes(candidate.status ?? "") &&
+      (candidate.roundId === null || typeof candidate.roundId === "string"),
+  );
+}
+
+function loadLegacyRoom(): PersistedRoom {
   if (typeof window === "undefined") return createRoom(DEFAULT_OTC);
   try {
     const value = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null") as PersistedRoom | null;
-    if (
-      value &&
-      value.id &&
-      value.draft &&
-      (value.draft.type === "otc" || value.draft.type === "loan") &&
-      ["collecting", "ready", "revealed", "selected"].includes(value.status)
-    ) {
-      return value;
-    }
+    if (isPersistedRoom(value)) return value;
   } catch {
     // A malformed demo record should never block the pilot from opening.
   }
   return createRoom(DEFAULT_OTC);
 }
 
-function persistRoom(room: PersistedRoom): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(room));
+function loadRooms(): PersistedRoom[] {
+  if (typeof window === "undefined") return [createRoom(DEFAULT_OTC)];
+  try {
+    const value = JSON.parse(window.localStorage.getItem(ROOMS_STORAGE_KEY) ?? "null") as unknown;
+    if (Array.isArray(value)) {
+      const rooms = value.filter(isPersistedRoom);
+      if (rooms.length > 0) return rooms;
+    }
+  } catch {
+    // Fall back to the original single-room record below.
+  }
+  return [loadLegacyRoom()];
 }
 
-function initialOffers(): SignalOffer[] {
-  const saved = loadRoom();
-  if (saved.id !== SAMPLE_ROOM_ID) return [];
+function loadRoom(): PersistedRoom {
+  return loadRooms()[0] ?? createRoom(DEFAULT_OTC);
+}
+
+function persistRooms(rooms: PersistedRoom[]): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(rooms));
+}
+
+function initialOffers(saved = loadRoom()): SignalOffer[] {
+  if (saved.roundId) return [];
+  if (saved.sampleOffers) return saved.sampleOffers;
   const revealed = saved.status === "revealed" || saved.status === "selected";
   return cloneOffers(saved.draft.type).map((offer) => ({ ...offer, revealed }));
 }
@@ -346,6 +372,15 @@ function formatDeadline(timestamp: number, now: number): string {
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
   return `${minutes}m ${seconds.toString().padStart(2, "0")}s remaining`;
+}
+
+function roomStatusLabel(status: SignalStatus): string {
+  return {
+    collecting: "Collecting offers",
+    ready: "Deadline reached",
+    revealed: "Offers revealed",
+    selected: "Provider selected",
+  }[status];
 }
 
 function shortId(value: string): string {
@@ -457,12 +492,13 @@ function dealRows(draft: DealDraft): Array<[string, string]> {
 
 export function SignalPilotPage({ goHome }: { goHome: () => void }) {
   const toast = useToast();
+  const [roomList, setRoomList] = useState<PersistedRoom[]>(() => loadRooms());
   const [room, setRoom] = useState<PersistedRoom>(() => loadRoom());
   const [offers, setOffers] = useState<SignalOffer[]>(initialOffers);
   const [liveOffers, setLiveOffers] = useState<SignalOffer[]>([]);
   const [draft, setDraft] = useState<DealDraft>(() => loadRoom().draft);
   const [role, setRole] = useState<SignalRole>("organizer");
-  const [mode, setMode] = useState<SignalMode>("sample");
+  const [mode, setMode] = useState<SignalMode>(() => (loadRoom().roundId ? "live" : "sample"));
   const [durationPreset, setDurationPreset] = useState<DealDuration>(() => {
     const saved = loadRoom();
     return isDealDuration(saved.durationPreset)
@@ -471,14 +507,17 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
   });
   const [address, setAddress] = useState<string | null>(null);
   const [round, setRound] = useState<RoundV2 | null>(null);
-  const [roundInput, setRoundInput] = useState("");
+  const [roundInput, setRoundInput] = useState(() => loadRoom().roundId ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [receiptAmount, setReceiptAmount] = useState("1");
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState(false);
   const [providerName, setProviderName] = useState("Your desk");
   const [providerMeta, setProviderMeta] = useState("Invited provider");
-  const [offer, setOffer] = useState<SignalOfferData>(() => ({ ...EMPTY_OTC_OFFER }));
+  const [offer, setOffer] = useState<SignalOfferData>(() => {
+    const saved = loadRoom();
+    return saved.draft.type === "otc" ? { ...EMPTY_OTC_OFFER } : { ...EMPTY_LOAN_OFFER };
+  });
   const contract = useWalletContract(address);
   const reader = useReadOnlyContract();
   const sdk = useReadOnlySdk();
@@ -503,8 +542,27 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
   const selectedOffer = (mode === "live" ? liveOffers : offers).find((entry) => entry.id === room.selectedProviderId);
 
   useEffect(() => {
-    persistRoom(room);
+    setRoomList((current) => {
+      const index = current.findIndex((entry) => entry.id === room.id);
+      if (index < 0) return [...current, room];
+      if (JSON.stringify(current[index]) === JSON.stringify(room)) return current;
+      const next = current.slice();
+      next[index] = room;
+      return next;
+    });
   }, [room]);
+
+  useEffect(() => {
+    persistRooms(roomList);
+  }, [roomList]);
+
+  useEffect(() => {
+    if (room.roundId) return;
+    setRoom((current) => {
+      if (JSON.stringify(current.sampleOffers) === JSON.stringify(offers)) return current;
+      return { ...current, sampleOffers: offers };
+    });
+  }, [offers, room.roundId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -523,6 +581,11 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
       ? parts[2]
       : "";
     if (hashRoundId && hashRoundId !== room.roundId) {
+      const existingRoom = roomList.find((entry) => entry.roundId === hashRoundId);
+      if (existingRoom) {
+        activateRoom(existingRoom);
+        return;
+      }
       setMode("live");
       setRoundInput(hashRoundId);
       void refreshLive(hashRoundId).catch((error) => toast.push("error", "Live round load failed", displayError(error)));
@@ -535,7 +598,7 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
     }
   }, [mode, reader]);
 
-  async function refreshLive(target = liveRoundId) {
+  async function refreshLive(target = liveRoundId, dealType = draft.type) {
     if (!reader || !target || !/^\d+$/.test(target)) return;
     const request = ++refreshRequest.current;
     const rid = BigInt(target);
@@ -551,7 +614,7 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
           new Uint8Array(state.revealed_envelope),
           state.valid,
         ),
-        draft.type,
+        dealType,
       );
     }));
     if (request !== refreshRequest.current) return;
@@ -576,6 +639,28 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
         mode: "ReceiptOnly",
       };
     });
+  }
+
+  function activateRoom(nextRoom: PersistedRoom) {
+    setRoom(nextRoom);
+    setDraft(nextRoom.draft);
+    setDurationPreset(
+      isDealDuration(nextRoom.durationPreset)
+        ? nextRoom.durationPreset
+        : DEFAULT_DURATION_BY_TYPE[nextRoom.draft.type],
+    );
+    setOffers(initialOffers(nextRoom));
+    setLiveOffers([]);
+    setRound(null);
+    setRoundInput(nextRoom.roundId ?? "");
+    setRole("organizer");
+    const nextMode: SignalMode = nextRoom.roundId ? "live" : "sample";
+    setMode(nextMode);
+    if (nextRoom.roundId) {
+      void refreshLive(nextRoom.roundId, nextRoom.draft.type).catch((error) => {
+        toast.push("error", "Live round load failed", displayError(error));
+      });
+    }
   }
 
   function transactionHash(result: unknown): string | null {
@@ -960,6 +1045,36 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
             {index < progress.length - 1 && <ArrowRight size={15} aria-hidden="true" />}
           </div>
         ))}
+      </section>
+
+      <section className="signal-room-switcher" aria-label="Deal rooms">
+        <div className="signal-room-switcher-heading">
+          <div><span>Workspace</span><h2>Your deal rooms</h2></div>
+          <span className="signal-room-count">{roomList.length} room{roomList.length === 1 ? "" : "s"}</span>
+        </div>
+        <div className="signal-room-card-grid">
+          {roomList.map((entry) => (
+            <button
+              type="button"
+              className={`signal-room-card ${entry.id === room.id ? "active" : ""}`}
+              key={entry.id}
+              onClick={() => activateRoom(entry)}
+              aria-pressed={entry.id === room.id}
+            >
+              <div className="signal-room-card-topline">
+                <span>{entry.draft.type === "otc" ? "OTC deal" : "Loan deal"}</span>
+                <strong>{roomStatusLabel(entry.status)}</strong>
+              </div>
+              <h3>{entry.draft.title}</h3>
+              <dl>
+                <div><dt>Room</dt><dd>{shortId(entry.roundId ? `#${entry.roundId}` : entry.id)}</dd></div>
+                <div><dt>Deadline</dt><dd>{formatDeadline(entry.deadlineAt, now)}</dd></div>
+                <div><dt>Network</dt><dd>{entry.roundId ? NETWORK_LABEL : "Sample"}</dd></div>
+              </dl>
+            </button>
+          ))}
+        </div>
+        <p className="signal-helper">Each room is separate. Select a card to continue that deal; creating another room keeps this one here.</p>
       </section>
 
       <section className="signal-pilot-layout">
