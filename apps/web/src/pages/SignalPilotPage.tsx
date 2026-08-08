@@ -57,6 +57,19 @@ type SignalDealType = "otc" | "loan";
 type SignalRole = "organizer" | "provider";
 type SignalStatus = "collecting" | "ready" | "revealed" | "selected";
 type SignalMode = "sample" | "live";
+type DealDuration = "2m" | "5m" | "1d" | "15d";
+
+const DEAL_DURATION_OPTIONS: Array<{ value: DealDuration; label: string; seconds: number }> = [
+  { value: "2m", label: "2 min", seconds: 2 * 60 },
+  { value: "5m", label: "5 min", seconds: 5 * 60 },
+  { value: "1d", label: "1 day", seconds: 24 * 60 * 60 },
+  { value: "15d", label: "15 days", seconds: 15 * 24 * 60 * 60 },
+];
+
+const DEFAULT_DURATION_BY_TYPE: Record<SignalDealType, DealDuration> = {
+  otc: "5m",
+  loan: "1d",
+};
 
 interface DealDraft {
   type: SignalDealType;
@@ -111,6 +124,7 @@ interface PersistedRoom {
   mode: "ReceiptOnly";
   roundId: string | null;
   transactionHashes?: string[];
+  durationPreset?: DealDuration;
 }
 
 const STORAGE_KEY = "subrosa-signal-pilot-room-v1";
@@ -267,18 +281,31 @@ function cloneOffers(type: SignalDealType): SignalOffer[] {
   }));
 }
 
-function createRoom(draft: DealDraft): PersistedRoom {
+function durationSeconds(value: DealDuration): number {
+  return DEAL_DURATION_OPTIONS.find((option) => option.value === value)?.seconds ?? 5 * 60;
+}
+
+function durationLabel(value: DealDuration): string {
+  return DEAL_DURATION_OPTIONS.find((option) => option.value === value)?.label ?? "5 min";
+}
+
+function isDealDuration(value: unknown): value is DealDuration {
+  return DEAL_DURATION_OPTIONS.some((option) => option.value === value);
+}
+
+function createRoom(draft: DealDraft, duration: DealDuration = DEFAULT_DURATION_BY_TYPE[draft.type]): PersistedRoom {
   return {
     id: SAMPLE_ROOM_ID,
     draft,
     createdAt: Date.now(),
-    deadlineAt: Date.now() + 15 * 60 * 1000,
+    deadlineAt: Date.now() + durationSeconds(duration) * 1000,
     status: "collecting",
     selectedProviderId: null,
     revealedAt: null,
     mode: "ReceiptOnly",
     roundId: null,
     transactionHashes: [],
+    durationPreset: duration,
   };
 }
 
@@ -436,6 +463,12 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
   const [draft, setDraft] = useState<DealDraft>(() => loadRoom().draft);
   const [role, setRole] = useState<SignalRole>("organizer");
   const [mode, setMode] = useState<SignalMode>("sample");
+  const [durationPreset, setDurationPreset] = useState<DealDuration>(() => {
+    const saved = loadRoom();
+    return isDealDuration(saved.durationPreset)
+      ? saved.durationPreset
+      : DEFAULT_DURATION_BY_TYPE[saved.draft.type];
+  });
   const [address, setAddress] = useState<string | null>(null);
   const [round, setRound] = useState<RoundV2 | null>(null);
   const [roundInput, setRoundInput] = useState("");
@@ -593,7 +626,7 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
       if (!draft.title.trim()) throw new Error("Enter a deal title");
       toast.push("info", "Preparing live deal room", "The next step will open a Freighter signature request.");
       const drand = quicknet();
-      const commitSeconds = 120;
+      const commitSeconds = durationSeconds(durationPreset);
       const revealRound = await roundInSeconds(drand, commitSeconds + 15);
       const info = await drand.chain().info();
       const revealAt = Number(info.genesis_time) + Number(info.period) * revealRound;
@@ -624,11 +657,12 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
       const nextId = sent.result.unwrap().toString();
       const hash = transactionHash(sent);
       const nextRoom: PersistedRoom = {
-        ...createRoom({ ...draft }),
+        ...createRoom({ ...draft }, durationPreset),
         id: `signal-live-${nextId}`,
         deadlineAt: (revealAt - 10) * 1000,
         roundId: nextId,
         transactionHashes: hash ? [hash] : [],
+        durationPreset,
       };
       setMode("live");
       setRoom(nextRoom);
@@ -779,6 +813,7 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
   function switchType(type: SignalDealType) {
     const nextDraft = type === "otc" ? { ...DEFAULT_OTC } : { ...DEFAULT_LOAN };
     setDraft(nextDraft);
+    setDurationPreset(DEFAULT_DURATION_BY_TYPE[type]);
     setOffer(type === "otc" ? { ...EMPTY_OTC_OFFER } : { ...EMPTY_LOAN_OFFER });
   }
 
@@ -792,7 +827,8 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
 
   function resetRoom() {
     const nextDraft = draft.type === "otc" ? { ...DEFAULT_OTC } : { ...DEFAULT_LOAN };
-    const nextRoom = createRoom(nextDraft);
+    const nextDuration = DEFAULT_DURATION_BY_TYPE[nextDraft.type];
+    const nextRoom = createRoom(nextDraft, nextDuration);
     setDraft(nextDraft);
     setRoom(nextRoom);
     setOffers(cloneOffers(nextDraft.type));
@@ -800,13 +836,14 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
     setRound(null);
     setRoundInput("");
     setMode("sample");
+    setDurationPreset(nextDuration);
     setRole("organizer");
     setOffer(nextDraft.type === "otc" ? { ...EMPTY_OTC_OFFER } : { ...EMPTY_LOAN_OFFER });
   }
 
   function createDeal() {
     const nextRoom = {
-      ...createRoom({ ...draft }),
+      ...createRoom({ ...draft }, durationPreset),
       id: `signal-${draft.type}-${Date.now().toString(36)}`,
     };
     setRoom(nextRoom);
@@ -953,9 +990,10 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
                 </div>
               )}
               <label>Organizer notes<textarea value={draft.notes} onChange={(event) => updateDraft("notes", event.target.value)} rows={3} /></label>
+              <label>Offer window<select value={durationPreset} onChange={(event) => setDurationPreset(event.target.value as DealDuration)}>{DEAL_DURATION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
               {mode === "live" && <div className="signal-live-load"><label>Existing live round ID<input inputMode="numeric" placeholder="e.g. 12" value={roundInput} onChange={(event) => setRoundInput(event.target.value)} /></label><button type="button" className="secondary-action compact" onClick={loadLiveRoom} disabled={busy !== null}><RotateCcw size={15} />Load round</button></div>}
               <div className="signal-form-actions"><button type="button" className="primary-action" onClick={mode === "live" ? createLiveDeal : createDeal} disabled={busy !== null}>{busy === "create" ? "Waiting for wallet..." : <><FileCheck2 size={16} />{mode === "live" ? "Create live deal room" : "Create sample deal room"}</>}</button><button type="button" className="secondary-action" onClick={resetRoom} disabled={busy !== null}><RotateCcw size={16} />Reset local room</button></div>
-              <p className="signal-helper">{mode === "live" ? "Creates a real Core v2 ReceiptOnly round. Freighter asks you to sign; network fees are paid by the connected wallet." : "Sample mode stores only local walkthrough state. Switch to Live to create a real on-chain room."}</p>
+              <p className="signal-helper">{mode === "live" ? `Creates a real Core v2 ReceiptOnly round with a ${durationLabel(durationPreset)} commit window. Freighter asks you to sign; network fees are paid by the connected wallet.` : `Sample mode uses a ${durationLabel(durationPreset)} local offer window. Switch to Live to create a real on-chain room.`}</p>
             </div>
           </section>
 
