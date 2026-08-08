@@ -77,7 +77,7 @@ const installCode = `npm install @sub-rosa/sdk`;
 const clientCode = `import { SubRosaClient } from "@sub-rosa/sdk";
 
 const client = new SubRosaClient({
-  network: "testnet",
+  network: "testnet", // use "mainnet" for the production network
   secretKey: process.env.STELLAR_SECRET,
 });`;
 
@@ -420,6 +420,7 @@ export function DocsPage({ goHome }: { goHome: () => void }) {
             <div className="docs-intro-actions">
               <button type="button" onClick={() => jump("quickstart")}><Terminal size={17} />Start integrating</button>
               <button type="button" onClick={() => jump("auction")}><Code2 size={17} />Auction guide</button>
+              <a href="#/pilot/the-signal"><ShieldCheck size={17} />Try deal-flow pilot</a>
             </div>
             <div className="docs-proof-strip">
               <div><Package size={18} /><span>Public package</span><strong>@sub-rosa/sdk@0.2.2</strong></div>

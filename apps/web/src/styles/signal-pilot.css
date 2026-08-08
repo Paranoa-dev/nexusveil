@@ -35,6 +35,29 @@
   gap: 12px;
 }
 
+.signal-mode-switch {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface-0);
+}
+
+.signal-mode-switch button {
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.signal-mode-switch button.active {
+  color: var(--ink);
+  background: var(--surface-3);
+}
+
 .signal-pilot-network,
 .signal-pilot-kicker,
 .signal-panel-heading > div > span,
@@ -307,6 +330,22 @@
   flex-wrap: wrap;
   gap: 9px;
   padding-top: 3px;
+}
+
+.signal-live-load {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  padding-top: 4px;
+}
+
+.signal-live-load label {
+  flex: 1;
+}
+
+.signal-live-load button {
+  min-height: 40px;
+  border-radius: 6px;
 }
 
 .signal-form-actions button,
@@ -672,6 +711,28 @@
   line-height: 1.5;
 }
 
+.signal-receipt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+
+.signal-tx-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.signal-tx-list a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #aeb6ff;
+  font-size: 0.72rem;
+}
+
 .signal-receipt-footer a {
   flex: 0 0 auto;
   min-height: 36px;
@@ -737,6 +798,10 @@
 
   .signal-pilot-network {
     display: none;
+  }
+
+  .signal-mode-switch button {
+    padding: 0 7px;
   }
 
   .signal-pilot-nav .brand-link span {
