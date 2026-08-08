@@ -39,6 +39,7 @@ import {
   LOGO_SRC,
   NETWORK,
   NETWORK_LABEL,
+  STELLAR_NETWORK,
   displayError,
   freighterError,
   resolveFreighterAddress,
@@ -123,6 +124,8 @@ interface PersistedRoom {
   revealedAt: number | null;
   mode: "ReceiptOnly";
   roundId: string | null;
+  network?: string;
+  contractId?: string;
   transactionHashes?: string[];
   durationPreset?: DealDuration;
   sampleOffers?: SignalOffer[];
@@ -291,6 +294,13 @@ function durationLabel(value: DealDuration): string {
   return DEAL_DURATION_OPTIONS.find((option) => option.value === value)?.label ?? "5 min";
 }
 
+function uniqueRoomId(prefix: string): string {
+  const random = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${Date.now().toString(36)}-${random}`;
+}
+
 function isDealDuration(value: unknown): value is DealDuration {
   return DEAL_DURATION_OPTIONS.some((option) => option.value === value);
 }
@@ -381,6 +391,19 @@ function roomStatusLabel(status: SignalStatus): string {
     revealed: "Offers revealed",
     selected: "Provider selected",
   }[status];
+}
+
+function liveRoundMatches(room: PersistedRoom, roundId: string): boolean {
+  return room.roundId === roundId &&
+    (!room.network || room.network === STELLAR_NETWORK) &&
+    (!room.contractId || room.contractId === CONTRACT_ID);
+}
+
+function roomNetworkLabel(room: PersistedRoom): string {
+  if (!room.roundId) return "Sample";
+  if (room.network === "mainnet") return "Stellar Mainnet";
+  if (room.network === "testnet") return "Stellar Testnet";
+  return "Live network";
 }
 
 function shortId(value: string): string {
@@ -581,14 +604,24 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
       ? parts[2]
       : "";
     if (hashRoundId && hashRoundId !== room.roundId) {
-      const existingRoom = roomList.find((entry) => entry.roundId === hashRoundId);
+      const existingRoom = roomList.find((entry) => liveRoundMatches(entry, hashRoundId));
       if (existingRoom) {
         activateRoom(existingRoom);
         return;
       }
+      const nextRoom: PersistedRoom = {
+        ...createRoom({ ...draft }, durationPreset),
+        id: uniqueRoomId("signal-live"),
+        deadlineAt: Date.now(),
+        roundId: hashRoundId,
+        network: STELLAR_NETWORK,
+        contractId: CONTRACT_ID,
+        transactionHashes: [],
+      };
+      setRoom(nextRoom);
       setMode("live");
       setRoundInput(hashRoundId);
-      void refreshLive(hashRoundId).catch((error) => toast.push("error", "Live round load failed", displayError(error)));
+      void refreshLive(hashRoundId, nextRoom.draft.type).catch((error) => toast.push("error", "Live round load failed", displayError(error)));
     }
   }, []);
 
@@ -632,11 +665,13 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
           : "revealed";
       return {
         ...current,
-        id: current.roundId === target ? current.id : `signal-live-${target}`,
+        id: current.roundId === target ? current.id : uniqueRoomId("signal-live"),
         roundId: target,
         deadlineAt: Number(nextRound.commit_deadline) * 1000,
         status,
         mode: "ReceiptOnly",
+        network: STELLAR_NETWORK,
+        contractId: CONTRACT_ID,
       };
     });
   }
@@ -743,9 +778,11 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
       const hash = transactionHash(sent);
       const nextRoom: PersistedRoom = {
         ...createRoom({ ...draft }, durationPreset),
-        id: `signal-live-${nextId}`,
+        id: uniqueRoomId("signal-live"),
         deadlineAt: (revealAt - 10) * 1000,
         roundId: nextId,
+        network: STELLAR_NETWORK,
+        contractId: CONTRACT_ID,
         transactionHashes: hash ? [hash] : [],
         durationPreset,
       };
@@ -767,11 +804,29 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
   async function loadLiveRoom() {
     setBusy("load");
     try {
-      if (!/^\d+$/.test(roundInput.trim())) throw new Error("Round ID must be a whole number");
+      const target = roundInput.trim();
+      if (!/^\d+$/.test(target)) throw new Error("Round ID must be a whole number");
+      const existingRoom = roomList.find((entry) => liveRoundMatches(entry, target));
+      if (existingRoom) {
+        activateRoom(existingRoom);
+        toast.push("success", "Live room selected", `ReceiptOnly round #${target}`);
+        return;
+      }
+      const nextRoom: PersistedRoom = {
+        ...createRoom({ ...draft }, durationPreset),
+        id: uniqueRoomId("signal-live"),
+        deadlineAt: Date.now(),
+        roundId: target,
+        network: STELLAR_NETWORK,
+        contractId: CONTRACT_ID,
+        transactionHashes: [],
+      };
+      setRoom(nextRoom);
       setMode("live");
-      setRoom((current) => ({ ...current, roundId: roundInput.trim() }));
-      window.location.hash = `#/pilot/the-signal/${roundInput.trim()}`;
-      await refreshLive(roundInput.trim());
+      setRound(null);
+      setLiveOffers([]);
+      window.location.hash = `#/pilot/the-signal/${target}`;
+      await refreshLive(target, nextRoom.draft.type);
     } catch (error) {
       toast.push("error", "Live round load failed", displayError(error));
     } finally {
@@ -929,7 +984,7 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
   function createDeal() {
     const nextRoom = {
       ...createRoom({ ...draft }, durationPreset),
-      id: `signal-${draft.type}-${Date.now().toString(36)}`,
+      id: uniqueRoomId(`signal-${draft.type}`),
     };
     setRoom(nextRoom);
     setOffers([]);
@@ -1067,14 +1122,16 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
               </div>
               <h3>{entry.draft.title}</h3>
               <dl>
-                <div><dt>Room</dt><dd>{shortId(entry.roundId ? `#${entry.roundId}` : entry.id)}</dd></div>
+                <div><dt>Room key</dt><dd>{shortId(entry.id)}</dd></div>
+                <div><dt>On-chain round</dt><dd>{entry.roundId ? `#${entry.roundId}` : "Not created"}</dd></div>
                 <div><dt>Deadline</dt><dd>{formatDeadline(entry.deadlineAt, now)}</dd></div>
-                <div><dt>Network</dt><dd>{entry.roundId ? NETWORK_LABEL : "Sample"}</dd></div>
+                <div><dt>Network</dt><dd>{roomNetworkLabel(entry)}</dd></div>
+                {entry.contractId && <div><dt>Contract</dt><dd>{shortAddress(entry.contractId)}</dd></div>}
               </dl>
             </button>
           ))}
         </div>
-        <p className="signal-helper">Each room is separate. Select a card to continue that deal; creating another room keeps this one here.</p>
+        <p className="signal-helper">Each room is separate. Select a card to continue that deal; creating another room keeps this one here. On-chain round numbers are scoped to a network and contract, while the Room key identifies this browser card.</p>
       </section>
 
       <section className="signal-pilot-layout">
@@ -1116,7 +1173,7 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
             <div className="signal-panel-heading"><div><span>Deal room</span><h2>{draft.title}</h2></div><span className={`signal-status ${room.status}`}>{statusLabel}</span></div>
             <div className="signal-request-body">
               <div className="signal-request-summary"><dl>{dealRows(draft).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || "Not set"}</dd></div>)}</dl><p>{draft.notes}</p></div>
-              <div className="signal-room-meta"><div><span>Room</span><code>{shortId(room.id)}</code></div><div><span>Deadline</span><strong>{formatDeadline(room.deadlineAt, now)}</strong></div><div><span>Mode</span><strong>ReceiptOnly</strong></div><div><span>Escrow</span><strong>None</strong></div><button type="button" className="secondary-action compact" onClick={copyRoomLink}><Clipboard size={15} />{copied ? "Copied" : "Copy room link"}</button></div>
+              <div className="signal-room-meta"><div><span>Room key</span><code>{shortId(room.id)}</code></div><div><span>On-chain round</span><strong>{room.roundId ? `#${room.roundId}` : "Not created"}</strong></div>{room.contractId && <div><span>Contract</span><strong>{shortAddress(room.contractId)}</strong></div>}<div><span>Deadline</span><strong>{formatDeadline(room.deadlineAt, now)}</strong></div><div><span>Mode</span><strong>ReceiptOnly</strong></div><div><span>Escrow</span><strong>None</strong></div><button type="button" className="secondary-action compact" onClick={copyRoomLink}><Clipboard size={15} />{copied ? "Copied" : "Copy room link"}</button></div>
             </div>
           </section>
         </div>
