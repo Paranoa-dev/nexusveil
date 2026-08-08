@@ -101,8 +101,8 @@ export function LandingPage({
             <a className="secondary-action" href="#/docs" target="_blank" rel="noreferrer">
               Integration docs
             </a>
-            <a className="secondary-action" href="#/pilot">
-              Run a testnet pilot
+            <a className="secondary-action" href="#/pilot/the-signal">
+              Try the deal-flow pilot
             </a>
           </motion.div>
 

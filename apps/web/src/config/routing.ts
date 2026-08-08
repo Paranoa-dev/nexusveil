@@ -1,7 +1,7 @@
 import type { UseCaseId } from "./useCases";
 import { USE_CASES } from "./useCases";
 
-export type Page = "landing" | "demo" | "architecture" | "dashboard" | "pilot" | "docs";
+export type Page = "landing" | "demo" | "architecture" | "dashboard" | "pilot" | "signalPilot" | "docs";
 
 export interface RouteState {
   page: Page;
@@ -22,6 +22,9 @@ export function routeFromHash(source = window.location.hash): RouteState {
     return { page: "dashboard", useCase: "auction" };
   }
   if (parts[0] === "pilot") {
+    if (parts[1] === "the-signal") {
+      return { page: "signalPilot", useCase: "auction" };
+    }
     return { page: "pilot", useCase: "auction" };
   }
   if (parts[0] === "docs") {
@@ -48,6 +51,7 @@ export function hashFor(page: Page, useCase: UseCaseId = "auction"): string {
   if (page === "architecture") return "#/architecture";
   if (page === "dashboard") return "#/dashboard";
   if (page === "pilot") return "#/pilot";
+  if (page === "signalPilot") return "#/pilot/the-signal";
   if (page === "docs") return "#/docs";
   return `#/demo/${useCase}`;
 }

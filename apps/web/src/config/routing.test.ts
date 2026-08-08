@@ -12,6 +12,10 @@ test("pilot routes open the partner workspace", () => {
     page: "pilot",
     useCase: "auction",
   });
+  assert.deepEqual(routeFromHash("#/pilot/the-signal"), {
+    page: "signalPilot",
+    useCase: "auction",
+  });
 });
 
 test("pilot round links accept only numeric round ids", () => {
@@ -23,6 +27,7 @@ test("pilot round links accept only numeric round ids", () => {
 
 test("pilot navigation emits the canonical workspace hash", () => {
   assert.equal(hashFor("pilot"), "#/pilot");
+  assert.equal(hashFor("signalPilot"), "#/pilot/the-signal");
 });
 
 test("docs route and navigation use the canonical hash", () => {
