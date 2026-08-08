@@ -573,6 +573,7 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
         throw new Error(`Switch Freighter to the configured network (${NETWORK_LABEL})`);
       }
       setAddress(nextAddress);
+      setMode("live");
       toast.push("success", "Wallet connected", shortAddress(nextAddress));
     } catch (error) {
       toast.push("error", "Wallet connection failed", displayError(error));
@@ -590,6 +591,7 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
     try {
       if (!CONTRACT_ID) throw new Error("No Core v2 contract is configured for this network");
       if (!draft.title.trim()) throw new Error("Enter a deal title");
+      toast.push("info", "Preparing live deal room", "The next step will open a Freighter signature request.");
       const drand = quicknet();
       const commitSeconds = 120;
       const revealRound = await roundInSeconds(drand, commitSeconds + 15);
