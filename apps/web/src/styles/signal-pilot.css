@@ -343,6 +343,31 @@
   min-width: 0;
 }
 
+/* Keep the setup/sidebar row intact while letting the room index use both columns. */
+.signal-pilot-primary {
+  display: contents;
+}
+
+.signal-deal-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.signal-pilot-sidebar {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.signal-pilot-primary > .signal-room-switcher {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.signal-request-panel {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
 .signal-panel {
   min-width: 0;
   overflow: hidden;
@@ -902,6 +927,14 @@
 
   .signal-pilot-layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .signal-deal-panel,
+  .signal-pilot-sidebar,
+  .signal-pilot-primary > .signal-room-switcher,
+  .signal-request-panel {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .signal-offers-panel,
