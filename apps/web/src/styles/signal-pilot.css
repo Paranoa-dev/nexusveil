@@ -207,6 +207,11 @@
   margin: 0 auto 24px;
 }
 
+.signal-pilot-primary > .signal-room-switcher {
+  width: 100%;
+  margin: 0;
+}
+
 .signal-room-switcher-heading {
   display: flex;
   align-items: flex-end;

@@ -1102,38 +1102,6 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
         ))}
       </section>
 
-      <section className="signal-room-switcher" aria-label="Deal rooms">
-        <div className="signal-room-switcher-heading">
-          <div><span>Workspace</span><h2>Your deal rooms</h2></div>
-          <span className="signal-room-count">{roomList.length} room{roomList.length === 1 ? "" : "s"}</span>
-        </div>
-        <div className="signal-room-card-grid">
-          {roomList.map((entry) => (
-            <button
-              type="button"
-              className={`signal-room-card ${entry.id === room.id ? "active" : ""}`}
-              key={entry.id}
-              onClick={() => activateRoom(entry)}
-              aria-pressed={entry.id === room.id}
-            >
-              <div className="signal-room-card-topline">
-                <span>{entry.draft.type === "otc" ? "OTC deal" : "Loan deal"}</span>
-                <strong>{roomStatusLabel(entry.status)}</strong>
-              </div>
-              <h3>{entry.draft.title}</h3>
-              <dl>
-                <div><dt>Room key</dt><dd>{shortId(entry.id)}</dd></div>
-                <div><dt>On-chain round</dt><dd>{entry.roundId ? `#${entry.roundId}` : "Not created"}</dd></div>
-                <div><dt>Deadline</dt><dd>{formatDeadline(entry.deadlineAt, now)}</dd></div>
-                <div><dt>Network</dt><dd>{roomNetworkLabel(entry)}</dd></div>
-                {entry.contractId && <div><dt>Contract</dt><dd>{shortAddress(entry.contractId)}</dd></div>}
-              </dl>
-            </button>
-          ))}
-        </div>
-        <p className="signal-helper">Each room is separate. Select a card to continue that deal; creating another room keeps this one here. On-chain round numbers are scoped to a network and contract, while the Room key identifies this browser card.</p>
-      </section>
-
       <section className="signal-pilot-layout">
         <div className="signal-pilot-primary">
           <section className="signal-panel signal-deal-panel">
@@ -1167,6 +1135,38 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
               <div className="signal-form-actions"><button type="button" className="primary-action" onClick={mode === "live" ? createLiveDeal : createDeal} disabled={busy !== null}>{busy === "create" ? "Waiting for wallet..." : <><FileCheck2 size={16} />{mode === "live" ? "Create live deal room" : "Create sample deal room"}</>}</button><button type="button" className="secondary-action" onClick={resetRoom} disabled={busy !== null}><RotateCcw size={16} />Reset local room</button></div>
               <p className="signal-helper">{mode === "live" ? `Creates a real Core v2 ReceiptOnly round with a ${durationLabel(durationPreset)} commit window. Freighter asks you to sign; network fees are paid by the connected wallet.` : `Sample mode uses a ${durationLabel(durationPreset)} local offer window. Switch to Live to create a real on-chain room.`}</p>
             </div>
+          </section>
+
+          <section className="signal-room-switcher" aria-label="Deal rooms">
+            <div className="signal-room-switcher-heading">
+              <div><span>Workspace</span><h2>Your deal rooms</h2></div>
+              <span className="signal-room-count">{roomList.length} room{roomList.length === 1 ? "" : "s"}</span>
+            </div>
+            <div className="signal-room-card-grid">
+              {roomList.map((entry) => (
+                <button
+                  type="button"
+                  className={`signal-room-card ${entry.id === room.id ? "active" : ""}`}
+                  key={entry.id}
+                  onClick={() => activateRoom(entry)}
+                  aria-pressed={entry.id === room.id}
+                >
+                  <div className="signal-room-card-topline">
+                    <span>{entry.draft.type === "otc" ? "OTC deal" : "Loan deal"}</span>
+                    <strong>{roomStatusLabel(entry.status)}</strong>
+                  </div>
+                  <h3>{entry.draft.title}</h3>
+                  <dl>
+                    <div><dt>Room key</dt><dd>{shortId(entry.id)}</dd></div>
+                    <div><dt>On-chain round</dt><dd>{entry.roundId ? `#${entry.roundId}` : "Not created"}</dd></div>
+                    <div><dt>Deadline</dt><dd>{formatDeadline(entry.deadlineAt, now)}</dd></div>
+                    <div><dt>Network</dt><dd>{roomNetworkLabel(entry)}</dd></div>
+                    {entry.contractId && <div><dt>Contract</dt><dd>{shortAddress(entry.contractId)}</dd></div>}
+                  </dl>
+                </button>
+              ))}
+            </div>
+            <p className="signal-helper">Each room is separate. Select a card to continue that deal; creating another room keeps this one here. On-chain round numbers are scoped to a network and contract, while the Room key identifies this browser card.</p>
           </section>
 
           <section className="signal-panel signal-request-panel">
