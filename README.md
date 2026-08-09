@@ -4,39 +4,131 @@
 
 # Sub Rosa
 
-**Embeddable sealed-auction infrastructure for Stellar.** Bidders lock Stellar
-assets and submit bids that remain unreadable until a public Drand round. The
-Soroban contract then verifies the reveal and atomically exchanges the winning
-payment for the auction lot while refunding losing escrow.
+**Embeddable sealed-market infrastructure for Stellar.** Sub Rosa lets an
+application collect private bids or proposals, reveal them at a publicly
+verifiable time, and either settle assets atomically or produce a canonical
+receipt for an off-chain decision.
+
+<p align="center">
+  <a href="https://sub-rosa-web.vercel.app/">Live app</a> |
+  <a href="https://sub-rosa-web.vercel.app/#/pilot/the-signal">Testnet pilot / deal flow</a> |
+  <a href="https://sub-rosa-web.vercel.app/#/docs">Hosted docs</a> |
+  <a href="./packages/sdk/README.md">SDK docs</a> |
+  <a href="https://stellar.expert/explorer/testnet/contract/CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV">Testnet contract</a> |
+  <a href="https://stellar.expert/explorer/public/contract/CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325">Mainnet contract</a>
+</p>
 
 Sub Rosa is a protocol and integration stack, not only a hosted application:
 
-- a Soroban round contract with on-chain Drand BLS12-381 verification;
+- a Soroban sealed-round contract with on-chain Drand BLS12-381 verification;
 - a public TypeScript SDK with high-level partner templates;
-- a tlock package for deterministic sealed payloads;
+- a tlock package for deterministic time-locked payloads;
 - a permissionless keeper for reveal and settlement;
-- a hosted pilot UI and public receipts.
+- a hosted pilot UI with public lifecycle receipts.
 
-The primary economic use case is an **asset-backed sealed auction**. A second
-`ReceiptOnly` template supports partners that need confidential proposals and a
-verifiable simultaneous reveal without putting funds in escrow.
+The project is licensed under [MIT](./LICENSE).
 
-Licensed under [MIT](./LICENSE).
+## Status at a glance
+
+| Surface | Current status |
+| --- | --- |
+| Core v2 testnet | Active, with settled `ReceiptOnly` and atomic auction proofs |
+| Core v2 mainnet | Official deployment active at the contract linked above |
+| Public SDK | `@sub-rosa/sdk`, named `testnet` and `mainnet` presets |
+| Hosted pilot | Standalone The Signal-style OTC and loan deal flow |
+| Production boundary | Independent funds-handling review still required before uncapped value |
+
+Core v2 uses the same versioned payload envelope, Drand reveal gate,
+permissionless lifecycle, public read surface, and deterministic receipt model
+on both Stellar networks. An integrator chooses the network and signs for the
+matching contract; a testnet deployment is never silently used for mainnet.
+The hosted demo may be configured to testnet for safe pilots; its active network
+is shown in the UI. Mainnet support is available through the explicit SDK and
+deployment configuration documented below.
+
+## Why Sub Rosa
+
+Many applications need a fair private decision before they can safely execute
+an on-chain action. A public mempool exposes quotes too early; a trusted
+operator can change the outcome; a normal database cannot prove that every
+participant saw the same reveal boundary.
+
+Sub Rosa provides the confidential competition primitive while leaving the rest
+of the workflow with the integrating application. It is designed to sit inside
+existing Stellar products rather than replace their discovery, identity,
+selection, payment, or escrow systems.
 
 ## Core v2 modes
 
-| Mode | Intended use | Settlement |
+| Mode | Use it for | What the contract does |
 | --- | --- | --- |
-| `Auction` | High-value assets, collectibles, access rights, or other Stellar-native lots | Winner payment to seller and lot to winner in one settlement |
-| `ReceiptOnly` | Confidential proposal collection and design-partner pilots | No asset movement; canonical reveal receipt only |
+| `Auction` | Asset sales, grants, bounties, RFPs, access rights, and other lots that must settle on-chain | Holds the lot, enforces identical bidder escrow, verifies reveals, refunds losers, and atomically transfers the winning payment and lot |
+| `ReceiptOnly` | Confidential provider proposals, design-partner pilots, OTC quotes, and loan terms | Seals and reveals the proposal set, records a verifiable receipt, and moves no assets |
 
-Both modes use the same versioned payload envelope, Drand reveal gate,
-permissionless lifecycle, public read surface, and deterministic receipt model.
-Partner rounds can be open or contract-enforced allowlist rounds. Auctions also
-enforce one identical escrow amount for every bidder, so differing public
-escrow values do not leak relative bid sizes before reveal.
-New partner workflows should be expressed as typed templates over these reviewed
-modes rather than custom settlement callbacks.
+Both modes support open rounds or contract-enforced participant allowlists.
+`Auction` rounds require one identical public escrow amount for every bidder so
+the escrow cannot reveal relative bid sizes before the reveal gate. New partner
+workflows should be typed templates over these reviewed modes instead of custom
+settlement callbacks.
+
+## How it fits into an application
+
+```text
+Partner application
+        |
+        v
+Create a sealed round (Auction or ReceiptOnly)
+        |
+        v
+Participants submit encrypted payloads
+        |
+        v
+Drand round reaches the reveal boundary
+        |
+        v
+Permissionless open -> reveal -> clear
+        |
+        +--> Auction: contract settles the winning exchange
+        |
+        +--> ReceiptOnly: application compares the verified receipt and selects
+```
+
+The operator cannot decrypt a payload before the configured Drand round. After
+the boundary, any account can advance the lifecycle. If reveal cannot complete,
+the contract exposes a grace-period void path that returns held assets.
+
+## Hosted deal-flow pilot
+
+[Open the standalone pilot](https://sub-rosa-web.vercel.app/#/pilot/the-signal)
+
+The hosted pilot is a The Signal-style validation surface built entirely on the
+Sub Rosa side. It demonstrates the deal flow without requiring a The Signal
+database, production-code change, or escrow integration:
+
+1. An organizer creates an OTC or loan deal room.
+2. Providers submit private `ReceiptOnly` offers.
+3. The organizer chooses a deadline of `2 min`, `5 min`, `1 day`, or `15 days`.
+4. Offers remain sealed until the shared reveal boundary.
+5. The revealed receipt lets the organizer compare terms and choose a winner
+   manually.
+
+This is a named early-pilot and validation workflow, not a claim of production
+integration with The Signal. It is intentionally useful as a linkable demo
+while leaving settlement and business selection to the partner application.
+
+## Ecosystem validation
+
+- **Build on Stellar Istanbul 2026:** first place in the Hack Privacy track.
+- **Stellar ecosystem programs:** SCF and Instawards materials are backed by
+  public Core v2 contracts, SDK integration, receipts, and a runnable pilot.
+- **The Signal:** early pilot and validation partner for the standalone
+  confidential OTC and loan deal-flow pilot above.
+- **Open x402 / Ithaca Labs:** integration work is being explored around sealed
+  provider bidding between MCP discovery and x402 payment.
+
+These statements describe the current validation scope. They do not imply that
+partner production codebases, private databases, or payment rails have been
+modified by this repository.
 
 ## Public SDK
 
@@ -44,8 +136,8 @@ modes rather than custom settlement callbacks.
 npm install @sub-rosa/sdk
 ```
 
-The SDK includes the tlock and generated contract packages as versioned runtime
-dependencies. Integrators normally need only the SDK:
+The SDK includes the tlock and generated contract packages as version-matched
+runtime dependencies. Integrators normally need only the SDK:
 
 ```ts
 import {
@@ -79,20 +171,50 @@ const sealed = await sealAssetBid({
   amount: 700n,
 });
 
-await client.submitV2({ roundId, sealed, escrow: 1_000n }); // must equal fixedEscrow
+await client.submitV2({ roundId, sealed, escrow: 1_000n });
 ```
 
-Switch to `network: "mainnet"` to use the canonical Core v2 deployment on the
-Stellar public network. An explicit reviewed `contractId` remains supported
-for caller-owned deployments. The signer supplied by the integrator pays each
-submitted transaction's network fee; Sub Rosa does not subsidize SDK calls by
-default.
+Use `network: "mainnet"` for the canonical Core v2 public-network deployment.
+Browser integrations pass a wallet public key and signing callbacks instead of
+placing a secret key in the frontend:
 
-See [packages/sdk/README.md](./packages/sdk/README.md) for both integration
-templates and [docs/INTEGRATION.md](./docs/INTEGRATION.md) for lifecycle,
-preflight, keeper, and deployment guidance.
+```ts
+const client = new SubRosaClient({
+  network: "mainnet",
+  publicKey: walletAddress,
+  signTransaction: wallet.signTransaction,
+  signAuthEntry: wallet.signAuthEntry,
+});
+```
 
-## Lifecycle
+An explicit reviewed `contractId` remains supported for caller-owned
+deployments. The SDK checks the RPC passphrase and contract existence before
+simulation, signing, or submission, and exposes successful hashes through
+`client.submittedTransactionHashes`.
+
+See [packages/sdk/README.md](./packages/sdk/README.md) for proposal templates,
+preflight helpers, browser signing, and custom network configuration. See
+[docs/INTEGRATION.md](./docs/INTEGRATION.md) for the full lifecycle and keeper
+flow.
+
+## Networks, signing, and fees
+
+| Network | SDK setting | Who pays the Stellar fee? |
+| --- | --- | --- |
+| Stellar Testnet | `network: "testnet"` | The source account that signs the transaction |
+| Stellar Mainnet | `network: "mainnet"` | The source account that signs the transaction |
+
+The application must use the contract, RPC, and network passphrase for the
+same network. Contract escrow and lot custody are separate from network fees.
+Sub Rosa does not subsidize SDK calls by default; an application can add a
+relayer if it explicitly wants sponsored fees, in which case that relayer pays.
+
+Repository deployment and capped smoke scripts require an explicit
+`MAINNET_CONFIRM=SUB_ROSA_MAINNET` confirmation and funded operator/bidder
+accounts. That safety gate applies to those scripts, not as a hidden cap on
+wallet-signed SDK integrations.
+
+## Lifecycle and receipts
 
 ```text
 Create round
@@ -104,12 +226,11 @@ Create round
     -> public receipt
 ```
 
-If reveal cannot complete, the contract exposes a grace-period void path that
-returns held assets. The operator cannot decrypt submissions before `R` and
-does not control who is allowed to advance the lifecycle after `R`.
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for system boundaries and
-[docs/THREAT_MODEL.md](./docs/THREAT_MODEL.md) for residual risks.
+`Auction` settlement transfers the winning payment to the seller, returns the
+winner's unused escrow, refunds losing escrow, and transfers the lot to the
+winner. `ReceiptOnly` produces a canonical reveal receipt but makes no business
+decision and moves no assets. Applications that need ledger provenance should
+verify the receipt and query the configured Stellar contract directly.
 
 ## Verified artifacts
 
@@ -119,30 +240,51 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system boundaries and
 | --- | --- |
 | Contract | [`CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV`](https://stellar.expert/explorer/testnet/contract/CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV) |
 | WASM hash | `2c7bc6b4c91940ac185df38a3d0a8532b555140d818df94f03f894e5952ebf42` |
-| Proposal proof | Round `2` - allowlisted `ReceiptOnly` - settled and receipt verified |
-| Atomic auction proof | Round `3` - fixed escrow - `20 SRUSD` to seller and `1 SRLOT` to winner |
-
-### Mainnet protocol proof
-
-| Field | Value |
-| --- | --- |
-| Contract | [`CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX`](https://stellar.expert/explorer/public/contract/CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX) |
-| Round | `1` - settled |
-| Asset | Native XLM SAC |
-| Scope | Legacy v1 settlement smoke, not a Core v2 production deployment |
+| Proposal proof | Round `2` - allowlisted `ReceiptOnly`, settled and receipt verified |
+| Atomic auction proof | Round `3` - fixed escrow, `20 SRUSD` to seller and `1 SRLOT` to winner |
 
 ### Core v2 mainnet
 
 | Field | Value |
 | --- | --- |
+| Contract | [`CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325`](https://stellar.expert/explorer/public/contract/CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325) |
+| Deployment transaction | [`349fe1094c544a88a8ad862a26047f4acd537d77a1aef4d14805ad6827768094`](https://stellar.expert/explorer/public/tx/349fe1094c544a88a8ad862a26047f4acd537d77a1aef4d14805ad6827768094) |
+| Network | Stellar public network (Mainnet) |
 | WASM hash | `2c7bc6b4c91940ac185df38a3d0a8532b555140d818df94f03f894e5952ebf42` |
-| SDK support | `network: "mainnet"` with an explicit reviewed Core v2 contract ID |
-| Official deployment | `CDQOFNCJE5Z4ZZL76DU5652FOUKJVEIZWHFGCZVWH63UYBGPSZIPC325` |
-| Safety | Mainnet writes require an explicit confirmation phrase and micro-value caps |
+| SDK | `network: "mainnet"` selects this Core v2 deployment |
 
-Core v2 has verified testnet proofs and a capped Core v2 mainnet deployment.
-Funds-handling contracts require independent review before a production or
-uncapped mainnet integration.
+The mainnet deployment is public and capped in the repository's deployment
+workflow. It has not received an independent funds-handling audit. Use explicit
+value and participant limits, monitored keepers, and a reviewed contract/hash
+before any production or uncapped integration.
+
+### Historical mainnet proof
+
+| Field | Value |
+| --- | --- |
+| Contract | [`CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX`](https://stellar.expert/explorer/public/contract/CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX) |
+| Round | `1` - settled native XLM smoke |
+| Scope | Legacy v1 evidence only; never use it as the Core v2 contract |
+
+## Security boundary and current limits
+
+Sub Rosa reduces early information leakage and makes the reveal boundary
+verifiable. It does not provide identity, KYC, legal enforceability, business
+underwriting, or a guaranteed keeper service.
+
+- `ReceiptOnly` does not escrow, transfer, or select assets.
+- Provider selection in the hosted The Signal pilot remains an organizer
+  decision outside the contract.
+- A missed reveal window follows the contract's grace-period void path; pilots
+  should monitor liveness and define incident ownership.
+- The SDK cannot make an unknown deployment trustworthy. Pin the network,
+  contract ID, and expected WASM hash.
+- Independent Soroban funds-handling review is required before uncapped
+  mainnet value.
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md),
+[docs/THREAT_MODEL.md](./docs/THREAT_MODEL.md), and
+[docs/LIMITATIONS.md](./docs/LIMITATIONS.md).
 
 ## Monorepo
 
@@ -153,8 +295,8 @@ packages/tlock/          Drand tlock and auditor encryption
 packages/sdk/            Public integration SDK and templates
 services/keeper/         Permissionless lifecycle automation
 services/auction-template/ Reference auction integration
-apps/web/                 Hosted pilot and receipt UI
-docs/                     Current technical and partner documentation
+apps/web/                 Hosted pilot, docs, and receipt UI
+docs/                     Technical, security, and partner documentation
 ```
 
 ## Development
@@ -171,23 +313,16 @@ pnpm sdk:test
 pnpm sdk:typecheck
 pnpm packages:build
 pnpm packages:pack
+pnpm web:test
+pnpm web:typecheck
 pnpm web:build
+pnpm docs:check
+pnpm docs:check-links
 ```
 
 Live network scripts require explicit Stellar keys and configuration. Read
-[docs/DEPLOY.md](./docs/DEPLOY.md) before running a value-moving command.
-
-## Partner readiness
-
-The software is ready for repeatable testnet pilots when a partner can use a
-hosted link or the SDK without a protocol rewrite. Product evidence is a
-separate milestone and must include external participants, public round IDs,
-partner feedback, and a written next-step decision.
-
-The project does not describe an interested team as a completed pilot and does
-not describe testnet settlement as audited production usage. See
-[docs/PLATFORM_PLAN.md](./docs/PLATFORM_PLAN.md) and
-[docs/PILOT_PLAYBOOK.md](./docs/PILOT_PLAYBOOK.md).
+[docs/DEPLOY.md](./docs/DEPLOY.md) before running a value-moving command. Never
+commit secret keys, recovery phrases, or local deployment artifacts.
 
 ## Documentation
 
