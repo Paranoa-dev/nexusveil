@@ -2460,7 +2460,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                       </button>
                     </div>
                     <p className="signal-helper trustless-work-trustline-note">
-                      Funding needs {selectedProposal.data.totalAmount.toLocaleString()} USDC in the connected organizer wallet. A trustline only allows the wallet to hold USDC; it does not add a USDC balance. Testnet USDC is available from the <a href="https://faucet.circle.com" target="_blank" rel="noreferrer">Circle faucet <ExternalLink size={13} /></a> after selecting Stellar.
+                      Funding needs at least {selectedProposal.data.totalAmount.toLocaleString()} USDC plus a small XLM fee in the connected organizer wallet. A trustline only allows the wallet to hold USDC; it does not add a USDC balance. Testnet USDC is available from the <a href="https://faucet.circle.com" target="_blank" rel="noreferrer">Circle faucet <ExternalLink size={13} /></a> after selecting Stellar.
                     </p>
                     {selectedProposal.data.totalAmount > 20 && (
                       <div className="signal-live-load trustless-work-funding-warning">

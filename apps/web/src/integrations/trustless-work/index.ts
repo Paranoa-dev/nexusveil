@@ -236,6 +236,10 @@ export function formatTrustlessWorkApiError(
     return `Trustless Work may have submitted the transaction but returned incomplete Stellar metadata. The app will verify the transaction on Testnet before reporting failure.${traceSuffix(error)}`;
   }
 
+  if (/insufficient funds|insufficient balance|does not have enough funds/i.test(detail)) {
+    return `Trustless Work found the escrow, but the connected organizer wallet does not have enough USDC to fund it. A trustline only lets the wallet hold USDC; it does not create a USDC balance. Add at least the selected proposal amount plus a small XLM fee, then retry.${traceSuffix(error)}`;
+  }
+
   if (/MissingValue|non-existing value|get_escrow|Storage/i.test(detail)) {
     return `Trustless Work could not find escrow storage for the submitted contract ID. The app will re-discover the escrow by the organizer signer before retrying funding. Do not create another escrow.${traceSuffix(error)}`;
   }

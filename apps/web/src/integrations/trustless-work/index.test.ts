@@ -187,6 +187,21 @@ test("explains v1 credential mismatch without mentioning beta keys", () => {
   assert.match(message, /trace-456/);
 });
 
+test("explains insufficient funding balance without blaming the escrow contract", () => {
+  const message = formatTrustlessWorkApiError(
+    new TrustlessWorkApiError("The signer has insufficient funds to fund the escrow.", {
+      status: 400,
+      title: "Bad Request",
+      detail: "The signer has insufficient funds to fund the escrow.",
+    }),
+    { baseUrl: "https://dev.api.trustlesswork.com", apiVersion: "v1" },
+  );
+
+  assert.match(message, /not have enough USDC/);
+  assert.match(message, /trustline only lets the wallet hold USDC/);
+  assert.doesNotMatch(message, /could not find escrow storage/);
+});
+
 test("flags beta and v1 URL mismatches", () => {
   assert.ok(
     trustlessWorkConfigIssues({
