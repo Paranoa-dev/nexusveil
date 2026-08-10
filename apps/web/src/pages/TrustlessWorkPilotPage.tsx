@@ -42,6 +42,7 @@ import {
   LOGO_SRC,
   NETWORK,
   NETWORK_LABEL,
+  RPC_URL,
   STELLAR_NETWORK,
   displayError,
   freighterError,
@@ -66,7 +67,9 @@ import {
   readContractId,
   formatTrustlessWorkApiError,
   resolveTrustlessWorkConfig,
+  resolveContractIdFromStellarTransaction,
   sendSignedTransaction,
+  waitForTestnetTransactionStatus,
   waitForTestnetTransaction,
   trustlessWorkConfigIssues,
   type TrustlessWorkApiVersion,
@@ -707,13 +710,25 @@ function txHashFromResult(result: unknown): string | null {
   return typeof hash === "string" && hash ? hash : null;
 }
 
+function txHashFromError(error: unknown): string | null {
+  const message = transactionErrorText(error);
+  const match = message.match(/"hash"\s*:\s*"([a-f0-9]{64})"/i) ?? message.match(/\bhash\s*[:=]\s*["']?([a-f0-9]{64})/i);
+  return match?.[1] ?? null;
+}
+
+function isRetryableNetworkSendError(error: unknown): boolean {
+  const message = transactionErrorText(error);
+  return /TRY_AGAIN_LATER|try_again_later|Sending the transaction to the network failed/i.test(message);
+}
+
 async function sendTrustlessWorkTransaction(
   config: NonNullable<ReturnType<typeof resolveTrustlessWorkConfig>>,
   signedXdr: string,
+  options: { returnEscrowDataIsRequired?: boolean } = {},
 ): Promise<TrustlessWorkSendTransactionResponse> {
   const localTxHash = hashSignedTransaction(signedXdr, NETWORK);
   try {
-    const response = await sendSignedTransaction(config, signedXdr);
+    const response = await sendSignedTransaction(config, signedXdr, options);
     const txHash = response.txHash ?? localTxHash;
     return { ...response, txHash };
   } catch (error) {
@@ -1644,6 +1659,28 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     toast.push("success", "Sample proposals revealed", "All sample submissions are now visible.");
   }
 
+  async function sendRevealWithRecovery<T>(
+    buildTransaction: () => Promise<SignableTransaction<T>>,
+  ): Promise<T> {
+    try {
+      return await signAndSendWithSequenceRetry(buildTransaction);
+    } catch (error) {
+      if (!isRetryableNetworkSendError(error)) throw error;
+      const hash = txHashFromError(error);
+      if (!hash) throw error;
+      const transactionStatus = await waitForTestnetTransactionStatus(hash, { attempts: 7, delayMs: 1200 });
+      rememberTransaction(hash);
+      if (transactionStatus === "success") {
+        toast.push("info", "Reveal transaction confirmed", "The network returned a temporary response, but the reveal transaction succeeded. Continuing without resubmitting.");
+        return undefined as T;
+      }
+      if (transactionStatus === "pending") {
+        throw new Error(`Reveal transaction ${shortHash(hash)} is still pending on Testnet. Wait a few seconds before trying again.`);
+      }
+      throw new Error(`Reveal transaction ${shortHash(hash)} failed on Testnet. You can try reveal again.`);
+    }
+  }
+
   async function waitForRevealGate(target: string): Promise<RoundV2> {
     if (!contract) throw new Error("Wallet required");
     let lastRound: RoundV2 | null = null;
@@ -1680,7 +1717,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       if (current.status.tag === "Open") {
         const signature = await fetchRoundSignature(drand, Number(current.reveal_round));
         try {
-          const sent = await signAndSendWithSequenceRetry(() => (
+          const sent = await sendRevealWithRecovery(() => (
             contract.open_reveal_v2({ round_id: rid, drand_signature: Buffer.from(signature) })
           ));
           rememberTransaction(txHashFromResult(sent));
@@ -1708,7 +1745,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         if (!seal) throw new Error(`Encrypted offer is unavailable for ${shortAddr(bidder)}`);
         const envelope = await openPayload(new Uint8Array(seal.ciphertext), drand);
         try {
-          const sent = await signAndSendWithSequenceRetry(() => contract.reveal_v2({
+          const sent = await sendRevealWithRecovery(() => contract.reveal_v2({
             round_id: rid,
             bidder,
             envelope: Buffer.from(encodePayloadEnvelope(envelope)),
@@ -1778,8 +1815,25 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       });
       const signedError = freighterError(signed);
       if (signedError) throw new Error(signedError);
-      const submit = await sendTrustlessWorkTransaction(twConfig, signed.signedTxXdr);
-      const escrowContractId = submit.contractId ?? contractIdFromBuild ?? null;
+      const submit = await sendTrustlessWorkTransaction(twConfig, signed.signedTxXdr, {
+        returnEscrowDataIsRequired: true,
+      });
+      const deploymentTxHash = submit.txHash ?? build.txHash ?? null;
+      let escrowContractId = submit.contractId
+        ?? readContractId(submit.escrow)
+        ?? contractIdFromBuild
+        ?? readContractId(build.escrow)
+        ?? null;
+      if (!escrowContractId && deploymentTxHash) {
+        try {
+          escrowContractId = await resolveContractIdFromStellarTransaction(deploymentTxHash, RPC_URL, {
+            attempts: 8,
+            delayMs: 1200,
+          });
+        } catch {
+          // The signer/indexer fallback below remains available when RPC metadata is delayed.
+        }
+      }
       setTrustlessWorkReceipt((current) => ({
         ...current,
         deployBuild: build,
@@ -1791,7 +1845,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       rememberTransaction(build.txHash);
       rememberTransaction(submit.txHash);
       if (submit.code === "STELLAR_TX_SUBMITTED_INDEXER_LAGGING" || !escrowContractId) {
-        toast.push("info", "Trustless Work escrow submitted", "The tx landed, but the indexer has not caught up yet.");
+        toast.push("info", "Trustless Work escrow submitted", escrowContractId
+          ? `Contract ID ${shortHash(escrowContractId)} recovered from the Testnet transaction. The indexer is still catching up.`
+          : "The tx landed, but the indexer has not caught up yet. The app will keep looking for the escrow.");
         void syncTrustlessWorkEscrow(escrowContractId, address, engagementId);
       } else {
         toast.push("success", "Trustless Work escrow created", submit.contractId ? shortHash(submit.contractId) : "Escrow submitted");
@@ -1881,7 +1937,22 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     const engagementId = roundId
       ? `sub-rosa-round-${roundId}`
       : `sub-rosa-sample-${project.title.toLowerCase().replace(/\s+/g, "-")}`;
-    await syncTrustlessWorkEscrow(null, address, engagementId);
+    let contractId = trustlessWorkReceipt.escrowContractId ?? null;
+    const deploymentTxHash = trustlessWorkReceipt.deploySubmit?.txHash;
+    if (!contractId && deploymentTxHash) {
+      try {
+        contractId = await resolveContractIdFromStellarTransaction(deploymentTxHash, RPC_URL, {
+          attempts: 5,
+          delayMs: 1200,
+        });
+        if (contractId) {
+          setTrustlessWorkReceipt((current) => ({ ...current, escrowContractId: contractId }));
+        }
+      } catch {
+        // The signer lookup below can still recover the escrow when RPC metadata is unavailable.
+      }
+    }
+    await syncTrustlessWorkEscrow(contractId, address, engagementId);
   }
 
   async function syncTrustlessWorkEscrow(contractId: string | null, signer: string, engagementId: string) {
@@ -1891,9 +1962,20 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       let lastError: unknown = null;
       for (let attempt = 0; attempt < 8; attempt += 1) {
         try {
-          const candidates = contractId
-            ? [(await getEscrowByContractId(twConfig, contractId)).escrow]
-            : await getEscrowsBySigner(twConfig, signer);
+          let candidates: TrustlessWorkEscrowSnapshot[] = [];
+          if (contractId) {
+            try {
+              const direct = (await getEscrowByContractId(twConfig, contractId)).escrow;
+              if (direct && (readContractId(direct) || direct.milestones?.length)) {
+                candidates = [direct];
+              }
+            } catch (error) {
+              lastError = error;
+            }
+          }
+          if (!candidates.length) {
+            candidates = await getEscrowsBySigner(twConfig, signer);
+          }
           const exactMatch = candidates.find((entry) => entry.engagementId === engagementId);
           const titleMatches = candidates.filter((entry) => entry.title === project.title);
           const escrow = exactMatch ?? (titleMatches.length === 1 ? titleMatches[0] : candidates.length === 1 ? candidates[0] : undefined);
@@ -1979,6 +2061,10 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     { label: "Create escrow", done: Boolean(trustlessWorkReceipt.deploySubmit?.txHash || trustlessWorkReceipt.deploySubmit?.status || trustlessWorkReceipt.escrowContractId) },
     { label: "Fund escrow", done: Boolean(trustlessWorkReceipt.fundSubmit?.txHash || trustlessWorkReceipt.fundSubmit?.status) },
   ];
+  const escrowSubmissionStarted = Boolean(
+    trustlessWorkReceipt.deploySubmit?.txHash ||
+    trustlessWorkReceipt.escrowContractId,
+  );
 
   function proposalList(): ProposalRecord[] {
     return mode === "live" ? liveProposals : proposals;
@@ -2361,9 +2447,11 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                       <p>Create the escrow first. Fund it after the contract ID returns, then refresh to pull the latest on-chain state.</p>
                     </div>
                     <div className="pilot-actions">
-                      <button type="button" className="primary-action" onClick={createTrustlessWorkEscrow} disabled={!selectedProposal || busy !== null || !twConfig}>
+                      <button type="button" className="primary-action" onClick={createTrustlessWorkEscrow} disabled={!selectedProposal || busy !== null || !twConfig || escrowSubmissionStarted}>
                         <Sparkles size={16} />
-                        Create Multi-Release Escrow
+                        {escrowSubmissionStarted
+                          ? trustlessWorkReceipt.escrowContractId ? "Escrow created" : "Escrow submitted - syncing"
+                          : "Create Multi-Release Escrow"}
                       </button>
                       <button type="button" className="secondary-action" onClick={fundTrustlessWorkEscrow} disabled={!trustlessWorkReceipt.escrowContractId || busy !== null || !twConfig}>
                         <WalletCards size={16} />

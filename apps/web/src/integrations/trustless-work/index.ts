@@ -529,6 +529,31 @@ export async function waitForTestnetTransaction(
   return false;
 }
 
+export type TestnetTransactionStatus = "success" | "failed" | "pending";
+
+export async function waitForTestnetTransactionStatus(
+  txHash: string,
+  options: { attempts?: number; delayMs?: number; horizonUrl?: string } = {},
+): Promise<TestnetTransactionStatus> {
+  const attempts = options.attempts ?? 8;
+  const delayMs = options.delayMs ?? 1000;
+  const horizonUrl = (options.horizonUrl ?? "https://horizon-testnet.stellar.org").replace(/\/+$/, "");
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await fetch(`${horizonUrl}/transactions/${encodeURIComponent(txHash)}`);
+    if (response.ok) {
+      const transaction = await response.json() as { successful?: boolean };
+      return transaction.successful === false ? "failed" : "success";
+    }
+    if (response.status !== 404) {
+      throw new Error(`Testnet transaction lookup failed with HTTP ${response.status}.`);
+    }
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
+    }
+  }
+  return "pending";
+}
+
 function findContractId(value: unknown): string | null {
   if (typeof value === "string" && StrKey.isValidContract(value)) return value;
   if (Array.isArray(value)) {
@@ -703,12 +728,21 @@ export async function fundMultiReleaseEscrow(
 export async function sendSignedTransaction(
   config: TrustlessWorkConfig,
   signedXdr: string,
+  options: { returnEscrowDataIsRequired?: boolean } = {},
 ): Promise<TrustlessWorkSendTransactionResponse> {
   if (!signedXdr.trim()) throw new Error("signedXdr must not be empty");
   const response = await trustlessWorkRequest<TrustlessWorkSendTransactionResponse & { hash?: string }>(
     config,
     config.apiVersion === "v1" ? "/helper/send-transaction" : "/stellar/send-transaction",
-    { method: "POST", body: { signedXdr } },
+    {
+      method: "POST",
+      body: {
+        signedXdr,
+        ...(config.apiVersion === "v1" && options.returnEscrowDataIsRequired
+          ? { returnEscrowDataIsRequired: true }
+          : {}),
+      },
+    },
   );
   return normalizeSendTransactionResponse(response);
 }
