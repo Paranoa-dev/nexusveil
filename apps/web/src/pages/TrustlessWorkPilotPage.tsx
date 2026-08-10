@@ -763,6 +763,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const [roundInputWarning, setRoundInputWarning] = useState("");
   const [now, setNow] = useState(nowMs());
   const [copied, setCopied] = useState(false);
+  const [hashRoundId, setHashRoundId] = useState(() => roomHashRoundId());
   const contract = useWalletContract(address);
   const reader = useReadOnlyContract();
   const sdk = useReadOnlySdk();
@@ -795,8 +796,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         ? "ready"
         : "collecting";
   const activeTxHashes = transactionHashes.length > 0 ? transactionHashes : saved.transactionHashes;
-  const routeRoundId = roomHashRoundId();
-  const activeLiveRoundId = liveRoundId || routeRoundId;
+  const activeLiveRoundId = hashRoundId || liveRoundId;
   const connectedWalletIsRoundOperator = Boolean(activeRoundReady && round && address && round.operator === address);
   const connectedWalletAlreadySubmitted = Boolean(activeRoundReady && round && address && round.bidders.includes(address));
   const liveProviderRoundMessage = activeRoundReady
@@ -843,17 +843,30 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (roomHashRoundId()) {
-      const hashRoundId = roomHashRoundId();
-      if (hashRoundId !== liveRoundId) {
-        setMode("live");
-        void refreshLiveWithRetry(hashRoundId).catch((error) => {
-          toast.push("error", "Live round load failed", displayError(error));
-        });
-      }
+    const onHashChange = () => setHashRoundId(roomHashRoundId());
+    window.addEventListener("hashchange", onHashChange);
+    onHashChange();
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (!hashRoundId) return;
+    if (hashRoundId === liveRoundId && loadedRoundId === hashRoundId) return;
+    refreshRequest.current += 1;
+    setMode("live");
+    setRoundId(hashRoundId);
+    setRound(null);
+    setLoadedRoundId(null);
+    setLiveProposals([]);
+    setSelectedProposalId(null);
+    setLiveLoadError(`Loading live round #${hashRoundId}...`);
+    if (reader) {
+      void refreshLiveWithRetry(hashRoundId).catch((error) => {
+        toast.push("error", "Live round load failed", displayError(error));
+      });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hashRoundId, reader]);
 
   useEffect(() => {
     if (!selectedProposal) return;
@@ -872,12 +885,12 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   }, [mode, liveProposals, selectedProposal]);
 
   useEffect(() => {
-    if (mode === "live" && reader && liveRoundId) {
+    if (mode === "live" && reader && liveRoundId && !hashRoundId) {
       void refreshLiveWithRetry(liveRoundId).catch((error) => {
         toast.push("error", "Live round load failed", displayError(error));
       });
     }
-  }, [mode, reader, liveRoundId]);
+  }, [mode, reader, liveRoundId, hashRoundId]);
 
   useEffect(() => {
     if (mode === "live" && reader) {
