@@ -789,6 +789,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const reader = useReadOnlyContract();
   const sdk = useReadOnlySdk();
   const refreshRequest = useRef(0);
+  const selectionPanelRef = useRef<HTMLElement | null>(null);
+  const handoffPanelRef = useRef<HTMLElement | null>(null);
   const twConfig = resolveTrustlessWorkConfig();
   const twConfigIssues = trustlessWorkConfigIssues();
   const liveRoundId = roundId;
@@ -840,6 +842,18 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     : revealActionReady
       ? "Open + reveal on-chain"
       : `Reveal in ${formatCountdown(revealCountdown.secondsRemaining)}`;
+
+  function scrollToSelectionPanel() {
+    window.setTimeout(() => {
+      selectionPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }
+
+  function scrollToHandoffPanel() {
+    window.setTimeout(() => {
+      handoffPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }
 
   useEffect(() => {
     savePersistedState({
@@ -1447,6 +1461,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   function revealSampleProposals() {
     if (!deadlinePassed || revealed || selectedProposal?.source === "live") return;
     setProposals((current) => current.map((entry) => ({ ...entry, revealed: true })));
+    setRole("organizer");
+    scrollToSelectionPanel();
     toast.push("success", "Sample proposals revealed", "All sample submissions are now visible.");
   }
 
@@ -1532,6 +1548,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         "Proposals revealed",
         `${revealedCount} new, ${alreadyRevealedCount} already open, ${bidders.length} participant(s) total`,
       );
+      setRole("organizer");
+      scrollToSelectionPanel();
     } catch (error) {
       if (isRevealGateNotReadyError(error)) {
         toast.push(
@@ -1934,11 +1952,26 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                 {revealButtonLabel}
               </button>
             )}
-            {revealed && <span className="signal-reveal-note"><CheckCircle2 size={15} />All offers opened together</span>}
+            {revealed && (
+              <>
+                <span className="signal-reveal-note"><CheckCircle2 size={15} />All offers opened together</span>
+                {selectedProposal ? (
+                  <button type="button" className="primary-action compact" onClick={scrollToHandoffPanel} disabled={busy !== null}>
+                    <Sparkles size={15} />
+                    Create escrow next
+                  </button>
+                ) : (
+                  <button type="button" className="primary-action compact" onClick={scrollToSelectionPanel} disabled={busy !== null}>
+                    <ArrowRight size={15} />
+                    Select winner
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
 
-        <aside className="pilot-panel">
+        <aside className="pilot-panel" ref={handoffPanelRef}>
           <div className="pilot-panel-heading">
             <span>{role === "organizer" ? "Handoff" : "Provider"}</span>
             <strong>{role === "organizer" ? "Trustless Work preview" : "Private proposal"}</strong>
@@ -2198,10 +2231,10 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         </aside>
 
         {revealed && (
-          <section className="pilot-results-panel">
+          <section className="pilot-results-panel" ref={selectionPanelRef}>
             <div className="pilot-panel-heading">
               <span>Selection</span>
-              <strong>Compare revealed proposals</strong>
+              <strong>{selectedProposal ? "Winner selected" : "Select winner"}</strong>
             </div>
             <div className="signal-offer-grid">
               {proposalList().filter((entry) => entry.revealed).map((entry) => (
