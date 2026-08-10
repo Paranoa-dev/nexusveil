@@ -275,10 +275,19 @@ function trustlineSummary(trustline: TrustlessWorkTrustlineConfig): string {
 function isRoundNotFoundError(error: unknown): boolean {
   const message = displayError(error);
   return (
+    !message ||
     message.includes("RoundNotFound") ||
     message.includes("Error(Contract, #3)") ||
     message.includes("ContractError(3)") ||
     message.includes("Contract, #3")
+  );
+}
+
+function isContractResultErr(value: unknown): boolean {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "error" in value,
   );
 }
 
@@ -842,6 +851,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     if (!reader) return false;
     try {
       const v2 = await reader.get_round_v2({ round_id: target });
+      if (isContractResultErr(v2.result)) return false;
       v2.result.unwrap();
       return true;
     } catch (error) {
