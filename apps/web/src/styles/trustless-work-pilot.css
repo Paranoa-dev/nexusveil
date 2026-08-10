@@ -100,6 +100,15 @@
   margin: 2px 0 0;
 }
 
+.trustless-work-pilot-page .trustless-work-round-warning {
+  margin: -4px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(217, 122, 115, 0.42);
+  border-radius: 6px;
+  color: #efaaa4;
+  background: rgba(217, 122, 115, 0.08);
+}
+
 @media (min-width: 721px) {
   .trustless-work-pilot-page .trustless-work-action-rail {
     position: sticky;

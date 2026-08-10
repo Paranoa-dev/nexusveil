@@ -88,6 +88,7 @@ const DEADLINE_OPTIONS: Array<{ value: DeadlinePreset; label: string; seconds: n
   { value: "1d", label: "1 day", seconds: 24 * 60 * 60 },
 ];
 const TRUSTLESS_WORK_TESTNET_USDC_CONTRACT_ID = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+const MAX_NEXT_ROUND_PROBE = 256;
 
 interface ProjectDraft {
   title: string;
@@ -269,6 +270,31 @@ function trustlineSummary(trustline: TrustlessWorkTrustlineConfig): string {
     return `${trustline.symbol} / ${shortWallet(trustline.address)}`;
   }
   return "Not configured";
+}
+
+function isRoundNotFoundError(error: unknown): boolean {
+  const message = displayError(error);
+  return (
+    message.includes("RoundNotFound") ||
+    message.includes("ContractError(3)") ||
+    message.includes("Contract, #3")
+  );
+}
+
+function roundInputIssue(value: string, nextRoundId: string | null): string | null {
+  const input = value.trim();
+  if (!input) return null;
+  if (!/^\d+$/.test(input)) return "Round ID must be a whole number.";
+  if (!nextRoundId) return null;
+  const current = BigInt(input);
+  const next = BigInt(nextRoundId);
+  if (current < next) {
+    return `Round #${input} already exists. This pilot only creates the next fresh round: #${nextRoundId}.`;
+  }
+  if (current > next) {
+    return `Round IDs are assigned in order by the contract. The next fresh round is #${nextRoundId}.`;
+  }
+  return null;
 }
 
 function defaultTrustlessWorkDraft(selectedWallet = sampleWallet(31)): TrustlessWorkDraft {
@@ -657,7 +683,7 @@ function initialState(): PersistedState {
     role: saved.role ?? "organizer",
     deadlineAt: saved.deadlineAt ?? nowMs() + deadlineSeconds(project.deadlinePreset) * 1000,
     roundId: saved.roundId ?? null,
-    roundInput: saved.roundInput ?? (saved.roundId ?? ""),
+    roundInput: saved.roundInput ?? "",
     selectedProposalId,
     proposals,
     proposalDraft,
@@ -691,6 +717,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const [round, setRound] = useState<RoundV2 | null>(null);
   const [liveProposals, setLiveProposals] = useState<ProposalRecord[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [roundProbeBusy, setRoundProbeBusy] = useState(false);
+  const [nextLiveRoundId, setNextLiveRoundId] = useState<string | null>(null);
+  const [roundInputWarning, setRoundInputWarning] = useState("");
   const [now, setNow] = useState(nowMs());
   const [copied, setCopied] = useState(false);
   const contract = useWalletContract(address);
@@ -699,7 +728,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const refreshRequest = useRef(0);
   const twConfig = resolveTrustlessWorkConfig();
   const twConfigIssues = trustlessWorkConfigIssues();
-  const liveRoundId = roundId ?? roundInput.trim();
+  const liveRoundId = roundId;
   const revealCountdown = useDrandCountdown(round ? Number(round.reveal_round) : 0);
   const selectedProposal = (mode === "live" ? liveProposals : proposals).find((entry) => entry.id === selectedProposalId) ?? null;
   const deadlinePassed = mode === "live"
@@ -711,6 +740,11 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const roundDeadlineAt = mode === "live" && round ? Number(round.commit_deadline) * 1000 : deadlineAt;
   const roundCountdown = formatDeadline(roundDeadlineAt, now);
   const liveSubmissionOpen = mode !== "live" || round?.status.tag === "Open";
+  const liveBidderCount = round?.bidders.length ?? 0;
+  const participantCount = mode === "live" ? liveBidderCount : proposals.length;
+  const currentRoundInputIssue = mode === "live"
+    ? roundInputIssue(roundInput, nextLiveRoundId)
+    : null;
   const status: PilotStatus = selectedProposal
     ? "selected"
     : revealed
@@ -760,7 +794,6 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       const hashRoundId = roomHashRoundId();
       if (hashRoundId !== liveRoundId) {
         setMode("live");
-        setRoundInput(hashRoundId);
         void refreshLive(hashRoundId).catch((error) => {
           toast.push("error", "Live round load failed", displayError(error));
         });
@@ -786,6 +819,15 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     }
   }, [mode, reader, liveRoundId]);
 
+  useEffect(() => {
+    if (mode === "live" && reader) {
+      void syncNextLiveRoundId({ syncInput: !roundInput.trim() }).catch((error) => {
+        toast.push("error", "Next round check failed", displayError(error));
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, reader]);
+
   function roomHashRoundId(): string {
     return trustlessWorkPilotRoundIdFromHash(window.location.hash);
   }
@@ -793,6 +835,70 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   function rememberTransaction(hash: string | null) {
     if (!hash) return;
     setTransactionHashes((current) => Array.from(new Set([...current, hash])));
+  }
+
+  async function roundExists(target: bigint): Promise<boolean> {
+    if (!reader) return false;
+    try {
+      const v2 = await reader.get_round_v2({ round_id: target });
+      v2.result.unwrap();
+      return true;
+    } catch (error) {
+      if (!isRoundNotFoundError(error)) throw error;
+    }
+
+    try {
+      const legacy = await reader.get_round({ round_id: target });
+      legacy.result.unwrap();
+      return true;
+    } catch (error) {
+      if (!isRoundNotFoundError(error)) throw error;
+      return false;
+    }
+  }
+
+  async function findNextLiveRoundId(): Promise<string> {
+    for (let id = 1n; id <= BigInt(MAX_NEXT_ROUND_PROBE); id += 1n) {
+      if (!(await roundExists(id))) return id.toString();
+    }
+    throw new Error(`Could not find a free round ID in the first ${MAX_NEXT_ROUND_PROBE} rounds.`);
+  }
+
+  async function syncNextLiveRoundId(options: { syncInput?: boolean } = {}): Promise<string | null> {
+    if (!reader) return null;
+    setRoundProbeBusy(true);
+    try {
+      const next = await findNextLiveRoundId();
+      const nextInput = options.syncInput ? next : roundInput;
+      setNextLiveRoundId(next);
+      if (options.syncInput) setRoundInput(next);
+      setRoundInputWarning(roundInputIssue(nextInput, next) ?? "");
+      return next;
+    } finally {
+      setRoundProbeBusy(false);
+    }
+  }
+
+  function updateRoundInput(value: string) {
+    setRoundInput(value);
+    setRoundInputWarning(roundInputIssue(value, nextLiveRoundId) ?? "");
+  }
+
+  function refreshSuggestedRoundInput() {
+    void syncNextLiveRoundId({ syncInput: true }).catch((error) => {
+      toast.push("error", "Next round check failed", displayError(error));
+    });
+  }
+
+  async function ensureFreshRoundInput(): Promise<boolean> {
+    const next = nextLiveRoundId ?? await syncNextLiveRoundId();
+    const issue = roundInputIssue(roundInput.trim() || next || "", next);
+    if (issue) {
+      setRoundInputWarning(issue);
+      toast.push("error", "Fresh round required", issue);
+      return false;
+    }
+    return true;
   }
 
   async function connect() {
@@ -846,7 +952,6 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     const revealedEntries = revealed.filter((entry): entry is ProposalRecord => entry !== null);
     setLiveProposals(revealedEntries);
     setRoundId(target);
-    setRoundInput(target);
     setProposals((current) => (
       current.some((entry) => entry.source === "live")
         ? current.filter((entry) => entry.source !== "live").concat(revealedEntries)
@@ -886,6 +991,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       toast.push("error", "Wallet required", "Connect Freighter before creating a live round.");
       return;
     }
+    if (!(await ensureFreshRoundInput())) return;
     setBusy("create-round");
     try {
       if (!CONTRACT_ID) throw new Error("No Core v2 contract is configured for this network");
@@ -920,30 +1026,16 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       if (hash) rememberTransaction(hash);
       setMode("live");
       setRoundId(nextId);
-      setRoundInput(nextId);
+      const followingId = (BigInt(nextId) + 1n).toString();
+      setNextLiveRoundId(followingId);
+      setRoundInput(followingId);
+      setRoundInputWarning("");
       setDeadlineAt((revealAt - 10) * 1000);
       window.location.hash = `#/pilot/trustless-work/${nextId}`;
       await refreshLive(nextId);
       toast.push("success", "Live round created", `ReceiptOnly round #${nextId}`);
     } catch (error) {
       toast.push("error", "Round creation failed", displayError(error));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function loadLiveRound() {
-    setBusy("load-round");
-    try {
-      const target = roundInput.trim();
-      if (!/^\d+$/.test(target)) throw new Error("Round ID must be a whole number");
-      setMode("live");
-      setRoundId(target);
-      window.location.hash = `#/pilot/trustless-work/${target}`;
-      await refreshLive(target);
-      toast.push("success", "Live round selected", `ReceiptOnly round #${target}`);
-    } catch (error) {
-      toast.push("error", "Live round load failed", displayError(error));
     } finally {
       setBusy(null);
     }
@@ -1093,6 +1185,11 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       const sent = await tx.signAndSend();
       const hash = txHashFromResult(sent);
       if (hash) rememberTransaction(hash);
+      setRound((current) => (
+        current
+          ? { ...current, bidders: Array.from(new Set([...current.bidders, address])) }
+          : current
+      ));
       setProposals((current) => [
         ...current.filter((entry) => entry.source !== "live" || entry.wallet !== address),
         {
@@ -1107,6 +1204,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         },
       ]);
       setRole("organizer");
+      await refreshLive(liveRoundId);
       toast.push("success", "Private proposal submitted", `Sealed on ReceiptOnly round #${liveRoundId}`);
     } catch (error) {
       toast.push("error", "Proposal submission failed", displayError(error));
@@ -1341,7 +1439,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
 
   const bridgeSteps = [
     { label: "Create project", done: true },
-    { label: "Private proposals", done: (mode === "live" ? liveProposals.length : proposals.length) > 0 },
+    { label: "Private proposals", done: participantCount > 0 },
     { label: "Deadline", done: deadlinePassed },
     { label: "Reveal", done: revealed },
     { label: "Select winner", done: Boolean(selectedProposal) },
@@ -1351,6 +1449,10 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
 
   function proposalList(): ProposalRecord[] {
     return mode === "live" ? liveProposals : proposals;
+  }
+
+  function liveBidderProposal(bidder: string): ProposalRecord | undefined {
+    return liveProposals.find((proposal) => proposal.wallet === bidder);
   }
 
   return (
@@ -1438,17 +1540,37 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
             {mode === "live" && (
               <div className="signal-live-load">
                 <label>
-                  Existing live round ID
-                  <input inputMode="numeric" placeholder="e.g. 12" value={roundInput} onChange={(event) => setRoundInput(event.target.value)} />
+                  Next live round ID
+                  <input
+                    inputMode="numeric"
+                    placeholder={nextLiveRoundId ? `#${nextLiveRoundId}` : "Checking next ID"}
+                    value={roundInput}
+                    onChange={(event) => updateRoundInput(event.target.value)}
+                    onFocus={refreshSuggestedRoundInput}
+                    aria-invalid={Boolean(currentRoundInputIssue || roundInputWarning)}
+                  />
                 </label>
-                <button type="button" className="secondary-action compact" onClick={loadLiveRound} disabled={busy !== null}>
+                <button
+                  type="button"
+                  className="secondary-action compact"
+                  onClick={refreshSuggestedRoundInput}
+                  disabled={busy !== null || roundProbeBusy}
+                >
                   <RefreshCw size={15} />
-                  Load round
+                  {roundProbeBusy ? "Checking..." : "Refresh next"}
                 </button>
               </div>
             )}
+            {mode === "live" && (currentRoundInputIssue || roundInputWarning) && (
+              <p className="signal-helper trustless-work-round-warning">{currentRoundInputIssue || roundInputWarning}</p>
+            )}
             <div className="pilot-actions">
-              <button type="button" className="primary-action" onClick={createLiveRound} disabled={busy !== null}>
+              <button
+                type="button"
+                className="primary-action"
+                onClick={createLiveRound}
+                disabled={busy !== null || roundProbeBusy || Boolean(currentRoundInputIssue || roundInputWarning)}
+              >
                 {busy === "create-round" ? "Creating..." : <><FileCheck2 size={16} />Create live round</>}
               </button>
               <button type="button" className="secondary-action" onClick={resetWorkspace} disabled={busy !== null}>
@@ -1473,16 +1595,43 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
             </div>
           </div>
           <div className="signal-provider-list">
-            {proposalList().map((proposal) => (
-              <div key={proposal.id}>
-                <span className="signal-provider-dot" />
-                <div>
-                  <strong>{shortWallet(proposal.wallet)}</strong>
-                  <span>{proposal.providerMeta}</span>
-                </div>
-                <code>{proposal.revealed ? "revealed" : "sealed"}</code>
-              </div>
-            ))}
+            {mode === "live"
+              ? (
+                  round?.bidders.length
+                    ? round.bidders.map((bidder) => {
+                        const proposal = liveBidderProposal(bidder);
+                        return (
+                          <div key={bidder}>
+                            <span className="signal-provider-dot" />
+                            <div>
+                              <strong>{proposal?.provider ?? shortWallet(bidder)}</strong>
+                              <span>{proposal?.providerMeta ?? "Submission sealed on-chain"}</span>
+                            </div>
+                            <code>{proposal?.revealed ? "revealed" : "sealed"}</code>
+                          </div>
+                        );
+                      })
+                    : (
+                        <div className="trustless-work-empty-row">
+                          <span className="signal-provider-dot" />
+                          <div>
+                            <strong>No live submissions yet</strong>
+                            <span>Provider commits will appear here as sealed participants.</span>
+                          </div>
+                          <code>0</code>
+                        </div>
+                      )
+                )
+              : proposalList().map((proposal) => (
+                  <div key={proposal.id}>
+                    <span className="signal-provider-dot" />
+                    <div>
+                      <strong>{shortWallet(proposal.wallet)}</strong>
+                      <span>{proposal.providerMeta}</span>
+                    </div>
+                    <code>{proposal.revealed ? "revealed" : "sealed"}</code>
+                  </div>
+                ))}
           </div>
           <div className="pilot-actions">
             {mode === "sample" && !deadlinePassed && (
@@ -1799,7 +1948,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
               <div><dt>Sub Rosa network</dt><dd>{STELLAR_NETWORK === "mainnet" ? NETWORK_LABEL : `${NETWORK_LABEL} · testnet`}</dd></div>
               <div><dt>Round ID</dt><dd>{roundId ? `#${roundId}` : "Sample only"}</dd></div>
               <div><dt>Mode</dt><dd>ReceiptOnly</dd></div>
-              <div><dt>Participants</dt><dd>{proposalList().length}</dd></div>
+              <div><dt>Participants</dt><dd>{participantCount}</dd></div>
               <div><dt>Reveal state</dt><dd>{revealed ? "Revealed" : "Sealed"}</dd></div>
               <div><dt>Selected proposal</dt><dd>{selectedProposal ? selectedProposal.provider : "Not selected"}</dd></div>
             </dl>
