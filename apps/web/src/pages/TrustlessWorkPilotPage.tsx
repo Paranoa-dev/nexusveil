@@ -1744,6 +1744,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       rememberTransaction(submit.txHash);
       if (submit.code === "STELLAR_TX_SUBMITTED_INDEXER_LAGGING") {
         toast.push("info", "Trustless Work escrow submitted", "The tx landed, but the indexer has not caught up yet.");
+        if (escrowContractId) {
+          void syncTrustlessWorkEscrow(escrowContractId);
+        }
       } else {
         toast.push("success", "Trustless Work escrow created", submit.contractId ? shortHash(submit.contractId) : "Escrow submitted");
       }
@@ -1806,15 +1809,38 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
 
   async function refreshTrustlessWorkEscrow() {
     if (!twConfig || !trustlessWorkReceipt.escrowContractId) return;
+    await syncTrustlessWorkEscrow(trustlessWorkReceipt.escrowContractId);
+  }
+
+  async function syncTrustlessWorkEscrow(contractId: string) {
+    if (!twConfig) return;
     setBusy("refresh-escrow");
     try {
-      const next = await getEscrowByContractId(twConfig, trustlessWorkReceipt.escrowContractId);
-      setTrustlessWorkReceipt((current) => ({
-        ...current,
-        escrow: next.escrow,
-        refreshedAt: nowMs(),
-      }));
-      toast.push("success", "Escrow refreshed", shortHash(trustlessWorkReceipt.escrowContractId));
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        try {
+          const next = await getEscrowByContractId(twConfig, contractId);
+          const hasEscrowData = Boolean(
+            readContractId(next.escrow) || next.escrow.milestones?.length,
+          );
+          if (hasEscrowData) {
+            setTrustlessWorkReceipt((current) => ({
+              ...current,
+              escrow: next.escrow,
+              refreshedAt: nowMs(),
+            }));
+            toast.push("success", "Escrow is ready", "The Trustless Work indexer has caught up. You can fund the escrow now.");
+            return;
+          }
+        } catch (error) {
+          lastError = error;
+        }
+        if (attempt < 7) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        }
+      }
+      if (lastError) throw lastError;
+      toast.push("info", "Escrow is still syncing", "Wait a few seconds, then use Refresh escrow again.");
     } catch (error) {
       toast.push("error", "Escrow refresh failed", formatTrustlessWorkApiError(error, twConfig));
     } finally {

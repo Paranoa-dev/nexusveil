@@ -471,12 +471,16 @@ export function readContractId(value: unknown): string | null {
 function normalizeUnsignedTransactionResponse(
   response: TrustlessWorkUnsignedTransactionResponse,
 ): TrustlessWorkUnsignedTransactionResponse {
-  const unsignedXdr = response.unsignedXdr || response.unsignedTransaction;
+  const nested = response.data && typeof response.data === "object"
+    ? response.data as TrustlessWorkUnsignedTransactionResponse
+    : response;
+  const unsignedXdr = nested.unsignedXdr || nested.unsignedTransaction;
   if (!unsignedXdr?.trim()) {
     throw new Error("Trustless Work did not return an unsigned transaction XDR.");
   }
   return {
     ...response,
+    ...nested,
     unsignedXdr,
   };
 }
