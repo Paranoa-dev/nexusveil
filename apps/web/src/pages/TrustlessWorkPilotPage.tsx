@@ -66,7 +66,6 @@ import {
   readContractId,
   formatTrustlessWorkApiError,
   resolveTrustlessWorkConfig,
-  resolveContractIdFromStellarTransaction,
   sendSignedTransaction,
   waitForTestnetTransaction,
   trustlessWorkConfigIssues,
@@ -712,10 +711,6 @@ async function sendTrustlessWorkTransaction(
   try {
     const response = await sendSignedTransaction(config, signedXdr);
     const txHash = response.txHash ?? localTxHash;
-    if (config.apiVersion === "v1" && txHash && !response.contractId) {
-      const contractId = await resolveContractIdFromStellarTransaction(txHash, import.meta.env.VITE_RPC_URL || "https://soroban-testnet.stellar.org");
-      return { ...response, txHash, contractId: contractId ?? response.contractId };
-    }
     return { ...response, txHash };
   } catch (error) {
     const message = displayError(error);
@@ -728,13 +723,8 @@ async function sendTrustlessWorkTransaction(
     if (!submitted) {
       throw new Error(`Trustless Work returned incomplete transaction metadata and Testnet could not find the transaction yet. Retry in a few seconds. Hash: ${txHash}`);
     }
-    const contractId = await resolveContractIdFromStellarTransaction(
-      txHash,
-      import.meta.env.VITE_RPC_URL || "https://soroban-testnet.stellar.org",
-    );
     return {
       txHash,
-      contractId: contractId ?? undefined,
       status: "submitted",
       code: "STELLAR_TX_SUBMITTED_INDEXER_LAGGING",
       message: "Transaction is on Stellar Testnet; Trustless Work metadata is still catching up.",
@@ -1475,6 +1465,11 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     window.location.hash = "#/pilot/trustless-work";
   }
 
+  function startLowValuePilot() {
+    resetWorkspace();
+    setMode("live");
+  }
+
   function updateProject<K extends keyof ProjectDraft>(key: K, value: ProjectDraft[K]) {
     setProject((current) => ({ ...current, [key]: value }));
   }
@@ -1793,17 +1788,40 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       toast.push("error", "Wallet required", "Connect Freighter before funding the escrow.");
       return;
     }
-    const contractId = trustlessWorkReceipt.escrowContractId;
-    if (!contractId) {
-      toast.push("error", "Escrow not created yet", "Create the escrow before funding it.");
-      return;
-    }
     if (!selectedProposal) {
       toast.push("error", "Select a proposal first", "Choose the winning proposal before funding.");
       return;
     }
     setBusy("fund-escrow");
     try {
+      const engagementId = roundId
+        ? `sub-rosa-round-${roundId}`
+        : `sub-rosa-sample-${project.title.toLowerCase().replace(/\s+/g, "-")}`;
+      let contractId = trustlessWorkReceipt.escrowContractId ?? null;
+      if (contractId) {
+        try {
+          const current = await getEscrowByContractId(twConfig, contractId);
+          if (!readContractId(current.escrow) && !current.escrow.milestones?.length) {
+            contractId = null;
+          }
+        } catch (error) {
+          if (!/MissingValue|get_escrow|non-existing value/i.test(displayError(error))) throw error;
+          contractId = null;
+        }
+      }
+      if (!contractId) {
+        const candidates = await getEscrowsBySigner(twConfig, address);
+        const exactMatch = candidates.find((entry) => {
+          const record = entry as Record<string, unknown>;
+          return entry.engagementId === engagementId || record.engagement_id === engagementId;
+        });
+        const titleMatches = candidates.filter((entry) => entry.title === project.title);
+        const escrow = exactMatch ?? (titleMatches.length === 1 ? titleMatches[0] : candidates.length === 1 ? candidates[0] : undefined);
+        contractId = readContractId(escrow);
+      }
+      if (!contractId) {
+        throw new Error("The escrow is still being indexed. Wait a few seconds, refresh the escrow, then fund it.");
+      }
       const build = await fundMultiReleaseEscrow(twConfig, {
         contractId,
         signer: address,
@@ -1839,7 +1857,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     const engagementId = roundId
       ? `sub-rosa-round-${roundId}`
       : `sub-rosa-sample-${project.title.toLowerCase().replace(/\s+/g, "-")}`;
-    await syncTrustlessWorkEscrow(trustlessWorkReceipt.escrowContractId ?? null, address, engagementId);
+    await syncTrustlessWorkEscrow(null, address, engagementId);
   }
 
   async function syncTrustlessWorkEscrow(contractId: string | null, signer: string, engagementId: string) {
@@ -2335,6 +2353,16 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                     <p className="signal-helper trustless-work-trustline-note">
                       Funding needs {selectedProposal.data.totalAmount.toLocaleString()} USDC in the connected organizer wallet. A trustline only allows the wallet to hold USDC; it does not add a USDC balance. Testnet USDC is available from the <a href="https://faucet.circle.com" target="_blank" rel="noreferrer">Circle faucet <ExternalLink size={13} /></a> after selecting Stellar.
                     </p>
+                    {selectedProposal.data.totalAmount > 20 && (
+                      <div className="signal-live-load trustless-work-funding-warning">
+                        <strong>This proposal belongs to an older high-value round.</strong>
+                        <span>Its {selectedProposal.data.totalAmount.toLocaleString()} USDC total is sealed on-chain and cannot be changed. Start a fresh 10 USDC pilot for the faucet-sized Testnet flow.</span>
+                        <button type="button" className="secondary-action compact" onClick={startLowValuePilot} disabled={busy !== null}>
+                          <RefreshCw size={15} />
+                          Start 10 USDC pilot
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="pilot-panel-heading trustless-work-advanced-heading">
                     <span>Milestones</span>
