@@ -225,7 +225,7 @@ export function formatTrustlessWorkApiError(
   }
 
   if (/trustline|asset trust|required asset|receiver/i.test(detail) && /could not be validated|does not have|missing|required/i.test(detail)) {
-    return `Trustless Work accepted the key, but a wallet in the escrow does not satisfy the selected asset trustline. For v1 testnet, every milestone receiver must be a real funded testnet wallet with a USDC trustline. Original error: ${detail}${traceSuffix(error)}`;
+    return `Trustless Work accepted the key, but a wallet in the escrow does not satisfy the selected asset trustline. For v1 testnet, every role wallet and milestone receiver must be a real funded testnet wallet with a USDC trustline. Original error: ${detail}${traceSuffix(error)}`;
   }
 
   return `${error.code ? `${error.code}: ` : ""}${detail}${traceSuffix(error)}`;

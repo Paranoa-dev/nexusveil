@@ -241,6 +241,28 @@ function defaultProposalDraft(): ProposalDraft {
   };
 }
 
+function defaultTrustlessWorkRoleWallets(): string[] {
+  return [40, 41, 42, 43, 44].map((seed) => sampleWallet(seed));
+}
+
+function shouldReplaceTrustlessWorkRole(value: string | undefined): boolean {
+  const address = value?.trim();
+  return !address || defaultTrustlessWorkRoleWallets().includes(address);
+}
+
+function trustlessWorkV1RoleAddress(value: string | undefined, signer: string): string {
+  return shouldReplaceTrustlessWorkRole(value) ? signer : value!.trim();
+}
+
+function isPilotSampleWallet(value: string | undefined): boolean {
+  const address = value?.trim();
+  if (!address) return true;
+  for (let seed = 30; seed <= 90; seed += 1) {
+    if (address === sampleWallet(seed)) return true;
+  }
+  return false;
+}
+
 function resolveTrustlessWorkContractId(value: string | undefined): string {
   const contractId = value?.trim();
   return contractId && StrKey.isValidContract(contractId)
@@ -712,7 +734,21 @@ function buildTrustlessWorkPayload(
   signer: string,
   engagementId: string,
 ): TrustlessWorkDeployMultiReleasePayload {
-  const roles = trustlessWorkRolesFromDraft(draft, proposal);
+  let roles = trustlessWorkRolesFromDraft(draft, proposal);
+  if (apiVersion === "v1") {
+    const serviceProvider = proposal.source === "live"
+      ? roles.serviceProviders[0]?.trim() || proposal.wallet
+      : signer;
+    roles = {
+      approvers: [trustlessWorkV1RoleAddress(roles.approvers[0], signer)],
+      serviceProviders: [serviceProvider],
+      platform: trustlessWorkV1RoleAddress(roles.platform, signer),
+      releaseSigners: [trustlessWorkV1RoleAddress(roles.releaseSigners[0], signer)],
+      disputeResolvers: [trustlessWorkV1RoleAddress(roles.disputeResolvers[0], signer)],
+      admin: trustlessWorkV1RoleAddress(roles.admin, signer),
+      observers: [],
+    };
+  }
   const milestones = proposal.data.milestones.map((milestone) => ({
     description: `${milestone.title} - ${milestone.description}`,
     amount: milestone.amount,
@@ -954,6 +990,37 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   }, [selectedProposal?.wallet]);
 
   useEffect(() => {
+    if (!address || !isTrustlessWorkV1) return;
+    setTrustlessWorkDraft((current) => {
+      let changed = false;
+      const next = { ...current };
+      const replaceRole = (field: "approver" | "platform" | "releaseSigner" | "disputeResolver" | "admin") => {
+        if (shouldReplaceTrustlessWorkRole(next[field])) {
+          next[field] = address;
+          changed = true;
+        }
+      };
+      replaceRole("approver");
+      replaceRole("platform");
+      replaceRole("releaseSigner");
+      replaceRole("disputeResolver");
+      replaceRole("admin");
+      if (
+        shouldReplaceTrustlessWorkRole(next.serviceProvider) ||
+        (selectedProposal?.source !== "live" && next.serviceProvider.trim() === selectedProposal?.wallet)
+      ) {
+        next.serviceProvider = selectedProposal?.source === "live" ? selectedProposal.wallet : address;
+        changed = true;
+      }
+      if (!StrKey.isValidEd25519PublicKey(next.trustlineAddress.trim())) {
+        next.trustlineAddress = TRUSTLESS_WORK_TESTNET_USDC_ISSUER;
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [address, isTrustlessWorkV1, selectedProposal?.source, selectedProposal?.wallet]);
+
+  useEffect(() => {
     if (mode !== "live") return;
     if (selectedProposal) return;
     if (liveProposals.length !== 1) return;
@@ -1088,7 +1155,15 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       }
       setAddress(nextAddress);
       if (role === "provider") {
-        setProposalDraft((current) => ({ ...current, providerWallet: nextAddress }));
+        setProposalDraft((current) => ({
+          ...current,
+          providerWallet: nextAddress,
+          milestones: current.milestones.map((milestone) => (
+            isPilotSampleWallet(milestone.receiver)
+              ? { ...milestone, receiver: nextAddress }
+              : milestone
+          )),
+        }));
       }
       toast.push("success", "Wallet connected", shortAddr(nextAddress));
     } catch (error) {
