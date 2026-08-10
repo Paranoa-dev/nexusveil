@@ -51,7 +51,7 @@ import {
   useReadOnlySdk,
   useWalletContract,
 } from "../lib/chain";
-import { useDrandCountdown } from "../hooks/useDrandCountdown";
+import { formatCountdown, useDrandCountdown } from "../hooks/useDrandCountdown";
 import { isRevealAlreadyOpen, isSubmissionAlreadyRevealed } from "../lib/pilotConcurrency";
 import { decodePilotSubmission, type PilotSubmissionView } from "../lib/pilotSubmission";
 import { shortAddr, shortHash, usdc } from "../lib/format";
@@ -90,6 +90,8 @@ const DEADLINE_OPTIONS: Array<{ value: DeadlinePreset; label: string; seconds: n
 ];
 const TRUSTLESS_WORK_TESTNET_USDC_CONTRACT_ID = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
 const MAX_NEXT_ROUND_PROBE = 256;
+const REVEAL_GATE_SYNC_ATTEMPTS = 12;
+const REVEAL_GATE_SYNC_DELAY_MS = 1500;
 
 interface ProjectDraft {
   title: string;
@@ -308,6 +310,24 @@ function isTxBadSeqError(error: unknown): boolean {
     message.includes("tx_bad_seq") ||
     message.includes("\"value\":-5") ||
     message.includes("\"value\": -5")
+  );
+}
+
+function isRevealGateNotReadyError(error: unknown): boolean {
+  const message = transactionErrorText(error);
+  return (
+    message.includes("RevealNotOpen") ||
+    message.includes("CommitNotClosed") ||
+    message.includes("Error(Contract, #13)") ||
+    message.includes("Error(Contract, #11)") ||
+    message.includes("ContractError(13)") ||
+    message.includes("ContractError(11)") ||
+    message.includes("Contract, #13") ||
+    message.includes("Contract, #11") ||
+    message.includes("Reveal gate is still opening") ||
+    message.includes("is still syncing") ||
+    message.includes("got 425") ||
+    message.includes("Error response fetching")
   );
 }
 
@@ -806,6 +826,19 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         ? "This is the organizer wallet. For the clean pilot flow, switch Freighter to a provider wallet before submitting."
         : liveLoadError || "Round data is ready for provider submission."
     : liveLoadError || "Load the live round before submitting a private proposal.";
+  const revealActionReady = Boolean(
+    mode === "live" &&
+    activeRoundReady &&
+    round &&
+    round.status.tag !== "Open"
+      ? true
+      : mode === "live" && activeRoundReady && round && revealCountdown.published,
+  );
+  const revealButtonLabel = busy === "reveal"
+    ? "Revealing..."
+    : revealActionReady
+      ? "Open + reveal on-chain"
+      : `Reveal in ${formatCountdown(revealCountdown.secondsRemaining)}`;
 
   useEffect(() => {
     savePersistedState({
@@ -1416,9 +1449,34 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     toast.push("success", "Sample proposals revealed", "All sample submissions are now visible.");
   }
 
+  async function waitForRevealGate(target: string): Promise<RoundV2> {
+    if (!contract) throw new Error("Wallet required");
+    let lastRound: RoundV2 | null = null;
+    for (let attempt = 0; attempt < REVEAL_GATE_SYNC_ATTEMPTS; attempt += 1) {
+      const next = (await contract.get_round_v2({ round_id: BigInt(target) })).result.unwrap();
+      lastRound = next;
+      if (next.status.tag === "Revealing" || next.status.tag === "Cleared" || next.status.tag === "Settled") {
+        return next;
+      }
+      if (next.status.tag === "Voided") {
+        throw new Error(`Round #${target} was voided.`);
+      }
+      await wait(REVEAL_GATE_SYNC_DELAY_MS);
+    }
+    if (lastRound) return lastRound;
+    throw new Error(`Round #${target} is still syncing.`);
+  }
+
   async function revealLiveProposals() {
     if (!contract || !round || !liveRoundId) return;
-    if (round.status.tag === "Open" && !revealCountdown.published) return;
+    if (round.status.tag === "Open" && !revealCountdown.published) {
+      toast.push(
+        "info",
+        "Reveal not ready",
+        `Drand round ${revealCountdown.targetRound} is not published yet. Try again in ${formatCountdown(revealCountdown.secondsRemaining)}.`,
+      );
+      return;
+    }
     setBusy("reveal");
     try {
       const rid = BigInt(liveRoundId);
@@ -1434,7 +1492,13 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         } catch (error) {
           if (!isRevealAlreadyOpen(error)) throw error;
         }
-        current = (await contract.get_round_v2({ round_id: rid })).result.unwrap();
+        current = await waitForRevealGate(liveRoundId);
+      }
+      if (current.status.tag === "Open") {
+        current = await waitForRevealGate(liveRoundId);
+      }
+      if (current.status.tag !== "Revealing" && current.status.tag !== "Cleared" && current.status.tag !== "Settled") {
+        throw new Error(`Reveal gate is still opening. Try again in ${formatCountdown(REVEAL_GATE_SYNC_ATTEMPTS * REVEAL_GATE_SYNC_DELAY_MS / 1000)}.`);
       }
       const bidders = (await contract.get_bidders_v2({ round_id: rid })).result.unwrap();
       let revealedCount = 0;
@@ -1468,7 +1532,15 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         `${revealedCount} new, ${alreadyRevealedCount} already open, ${bidders.length} participant(s) total`,
       );
     } catch (error) {
-      toast.push("error", "Reveal failed", displayError(error));
+      if (isRevealGateNotReadyError(error)) {
+        toast.push(
+          "info",
+          "Reveal not ready",
+          `The reveal gate is still opening. Wait ${formatCountdown(Math.ceil((REVEAL_GATE_SYNC_ATTEMPTS * REVEAL_GATE_SYNC_DELAY_MS) / 1000))}, then try again.`,
+        );
+      } else {
+        toast.push("error", "Reveal failed", displayError(error));
+      }
     } finally {
       setBusy(null);
     }
@@ -1856,9 +1928,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
               <span className="signal-reveal-note"><LockKeyhole size={15} />Commit deadline is still open</span>
             )}
             {mode === "live" && liveRoundId && deadlinePassed && !revealed && (
-              <button type="button" className="primary-action" onClick={revealLiveProposals} disabled={busy !== null || !revealCountdown.published}>
+              <button type="button" className="primary-action" onClick={revealLiveProposals} disabled={busy !== null || !revealActionReady}>
                 <UnlockIcon />
-                {busy === "reveal" ? "Revealing..." : revealCountdown.published ? "Open + reveal on-chain" : `Reveal in ${revealCountdown.secondsRemaining}s`}
+                {revealButtonLabel}
               </button>
             )}
             {revealed && <span className="signal-reveal-note"><CheckCircle2 size={15} />All offers opened together</span>}
