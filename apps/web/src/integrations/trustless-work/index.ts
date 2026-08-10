@@ -1,4 +1,4 @@
-import { StrKey, TransactionBuilder } from "@stellar/stellar-sdk";
+import { rpc, scValToNative, StrKey, TransactionBuilder } from "@stellar/stellar-sdk";
 import { Buffer } from "buffer";
 
 export interface TrustlessWorkConfig {
@@ -525,6 +525,48 @@ export async function waitForTestnetTransaction(
   return false;
 }
 
+function findContractId(value: unknown): string | null {
+  if (typeof value === "string" && StrKey.isValidContract(value)) return value;
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const contractId = findContractId(entry);
+      if (contractId) return contractId;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    for (const entry of Object.values(value)) {
+      const contractId = findContractId(entry);
+      if (contractId) return contractId;
+    }
+  }
+  return null;
+}
+
+export async function resolveContractIdFromStellarTransaction(
+  txHash: string,
+  rpcUrl: string,
+  options: { attempts?: number; delayMs?: number } = {},
+): Promise<string | null> {
+  const attempts = options.attempts ?? 10;
+  const delayMs = options.delayMs ?? 1500;
+  const server = new rpc.Server(rpcUrl);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const result = await server.getTransaction(txHash);
+    if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+      if (!result.returnValue) return null;
+      return findContractId(scValToNative(result.returnValue));
+    }
+    if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
+      throw new Error(`Stellar transaction ${txHash} failed on Testnet.`);
+    }
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
+    }
+  }
+  return null;
+}
+
 function normalizeGetEscrowResponse(response: unknown): TrustlessWorkGetEscrowResponse {
   if (response && typeof response === "object" && "escrow" in response) {
     const record = response as Partial<TrustlessWorkGetEscrowResponse>;
@@ -686,4 +728,32 @@ export async function getEscrowByContractId(
     config,
     `/escrows/${contractId.trim()}`,
   ));
+}
+
+export async function getEscrowsBySigner(
+  config: TrustlessWorkConfig,
+  signer: string,
+): Promise<TrustlessWorkEscrowSnapshot[]> {
+  if (!signer.trim()) throw new Error("signer must not be empty");
+  stellarKey(signer, "signer");
+  const params = new URLSearchParams({ signer: signer.trim(), validateOnChain: "true" });
+  const response = await trustlessWorkRequest<unknown>(
+    config,
+    config.apiVersion === "v1"
+      ? `/helper/get-escrows-by-signer?${params.toString()}`
+      : `/escrows?${params.toString()}`,
+  );
+  const record = response && typeof response === "object"
+    ? response as Record<string, unknown>
+    : {};
+  const entries = Array.isArray(response)
+    ? response
+    : Array.isArray(record.data)
+      ? record.data
+      : Array.isArray(record.escrows)
+        ? record.escrows
+        : record.escrow && typeof record.escrow === "object"
+          ? [record.escrow]
+          : [];
+  return entries.filter((entry): entry is TrustlessWorkEscrowSnapshot => Boolean(entry && typeof entry === "object"));
 }
