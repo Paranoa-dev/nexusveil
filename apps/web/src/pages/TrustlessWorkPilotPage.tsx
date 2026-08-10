@@ -26,6 +26,7 @@ import {
   ArrowRight,
   CheckCircle2,
   FileCheck2,
+  Clock3,
   LockKeyhole,
   RefreshCw,
   ShieldCheck,
@@ -69,6 +70,7 @@ import {
   type TrustlessWorkEscrowSnapshot,
   type TrustlessWorkMilestoneInput,
   type TrustlessWorkRoleConfig,
+  type TrustlessWorkTrustlineConfig,
   type TrustlessWorkSendTransactionResponse,
   type TrustlessWorkUnsignedTransactionResponse,
 } from "../integrations/trustless-work";
@@ -85,6 +87,7 @@ const DEADLINE_OPTIONS: Array<{ value: DeadlinePreset; label: string; seconds: n
   { value: "5m", label: "5 min", seconds: 5 * 60 },
   { value: "1d", label: "1 day", seconds: 24 * 60 * 60 },
 ];
+const TRUSTLESS_WORK_TESTNET_USDC_CONTRACT_ID = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
 
 interface ProjectDraft {
   title: string;
@@ -233,6 +236,41 @@ function defaultProposalDraft(): ProposalDraft {
   };
 }
 
+function resolveTrustlessWorkContractId(value: string | undefined): string {
+  const contractId = value?.trim();
+  return contractId && StrKey.isValidContract(contractId)
+    ? contractId
+    : TRUSTLESS_WORK_TESTNET_USDC_CONTRACT_ID;
+}
+
+function resolveTrustlessWorkTrustline(draft: TrustlessWorkDraft): TrustlessWorkTrustlineConfig {
+  const contractId = draft.trustlineContractId.trim();
+  if (contractId && StrKey.isValidContract(contractId)) {
+    return { contractId };
+  }
+
+  const symbol = draft.trustlineSymbol.trim();
+  const address = draft.trustlineAddress.trim();
+  if (symbol && address && StrKey.isValidEd25519PublicKey(address)) {
+    return { symbol, address };
+  }
+
+  return { contractId: TRUSTLESS_WORK_TESTNET_USDC_CONTRACT_ID };
+}
+
+function trustlineSummary(trustline: TrustlessWorkTrustlineConfig): string {
+  if (trustline.contractId) {
+    const label = trustline.contractId === TRUSTLESS_WORK_TESTNET_USDC_CONTRACT_ID
+      ? "Testnet USDC contract"
+      : "Custom contract";
+    return `${label} · ${shortAddr(trustline.contractId)}`;
+  }
+  if (trustline.symbol && trustline.address) {
+    return `${trustline.symbol} / ${shortWallet(trustline.address)}`;
+  }
+  return "Not configured";
+}
+
 function defaultTrustlessWorkDraft(selectedWallet = sampleWallet(31)): TrustlessWorkDraft {
   return {
     platformFee: "2",
@@ -243,7 +281,7 @@ function defaultTrustlessWorkDraft(selectedWallet = sampleWallet(31)): Trustless
     disputeResolver: sampleWallet(43),
     admin: sampleWallet(44),
     observers: "",
-    trustlineContractId: import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_CONTRACT_ID?.trim() ?? "",
+    trustlineContractId: resolveTrustlessWorkContractId(import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_CONTRACT_ID),
     trustlineSymbol: import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_SYMBOL?.trim() || "USDC",
     trustlineAddress: import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS?.trim() ?? "",
     receiverMemo: "",
@@ -571,12 +609,6 @@ function buildTrustlessWorkPayload(
     amount: milestone.amount,
     receiver: milestone.receiver,
   }));
-  const trustline = draft.trustlineContractId.trim()
-    ? { contractId: draft.trustlineContractId.trim() }
-    : {
-        symbol: draft.trustlineSymbol.trim(),
-        address: draft.trustlineAddress.trim(),
-      };
 
   return validateTrustlessWorkDeployPayload({
     signer,
@@ -586,7 +618,7 @@ function buildTrustlessWorkPayload(
     roles,
     platformFee: parseIntOrZero(draft.platformFee),
     milestones,
-    trustline,
+    trustline: resolveTrustlessWorkTrustline(draft),
     ...(draft.receiverMemo.trim()
       ? { receiverMemo: parseIntOrZero(draft.receiverMemo) }
       : {}),
@@ -612,8 +644,13 @@ function initialState(): PersistedState {
   const selectedProposalId = saved.selectedProposalId ?? proposals[0]?.id ?? null;
   const selectedProposal = proposals.find((entry) => entry.id === selectedProposalId);
   const proposalDraft = saved.proposalDraft ?? defaultProposalDraft();
-  const trustlessWorkDraft =
-    saved.trustlessWorkDraft ?? defaultTrustlessWorkDraft(selectedProposal?.wallet);
+  const trustlessWorkDraft = saved.trustlessWorkDraft
+    ? {
+        ...saved.trustlessWorkDraft,
+        trustlineContractId: resolveTrustlessWorkContractId(saved.trustlessWorkDraft.trustlineContractId),
+        trustlineSymbol: saved.trustlessWorkDraft.trustlineSymbol.trim() || "USDC",
+      }
+    : defaultTrustlessWorkDraft(selectedProposal?.wallet);
   return {
     project,
     mode: saved.mode ?? "sample",
@@ -671,6 +708,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const revealed = mode === "live"
     ? Boolean(round && (round.status.tag === "Revealing" || round.status.tag === "Cleared" || round.status.tag === "Settled"))
     : proposals.some((entry) => entry.revealed);
+  const roundDeadlineAt = mode === "live" && round ? Number(round.commit_deadline) * 1000 : deadlineAt;
+  const roundCountdown = formatDeadline(roundDeadlineAt, now);
+  const liveSubmissionOpen = mode !== "live" || round?.status.tag === "Open";
   const status: PilotStatus = selectedProposal
     ? "selected"
     : revealed
@@ -802,6 +842,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     );
     if (request !== refreshRequest.current) return;
     setRound(nextRound);
+    setDeadlineAt(Number(nextRound.commit_deadline) * 1000);
     const revealedEntries = revealed.filter((entry): entry is ProposalRecord => entry !== null);
     setLiveProposals(revealedEntries);
     setRoundId(target);
@@ -1007,7 +1048,11 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     }
     setBusy("submit-proposal");
     try {
-      if (round.status.tag !== "Open") throw new Error("This round is no longer accepting offers");
+      if (round.status.tag !== "Open") {
+        throw new Error(
+          `This round is no longer accepting offers (current status: ${round.status.tag}). Create a fresh live round and submit before the deadline.`,
+        );
+      }
       const details = buildProposalDetails(proposalDraft);
       const drand = quicknet();
       const sealed = await sealProposal({
@@ -1378,6 +1423,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
             <div className="pilot-facts">
               <div><dt>Budget</dt><dd>{project.budget} USDC</dd></div>
               <div><dt>Deadline</dt><dd>{deadlineLabel(project.deadlinePreset)}</dd></div>
+              <div><dt>Time left</dt><dd><Clock3 size={13} style={{ display: "inline", verticalAlign: "-2px", marginRight: 6 }} />{roundCountdown}</dd></div>
               <div><dt>Status</dt><dd>{sampleStatusLabel(status)}</dd></div>
               <div><dt>Round ID</dt><dd>{roundId ? `#${roundId}` : "Not created"}</dd></div>
             </div>
@@ -1544,11 +1590,17 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                   </div>
                 ))}
               </div>
-              <button type="button" className="primary-action" onClick={mode === "live" ? submitLiveProposal : createSampleProposal} disabled={busy !== null || (mode === "live" && (!round || !liveRoundId))}>
+              <button type="button" className="primary-action" onClick={mode === "live" ? submitLiveProposal : createSampleProposal} disabled={busy !== null || (mode === "live" && (!round || !liveRoundId || !liveSubmissionOpen))}>
                 <LockKeyhole size={16} />
-                {mode === "live" ? (busy === "submit-proposal" ? "Waiting for wallet..." : "Submit private proposal on-chain") : "Submit private proposal"}
+                {mode === "live"
+                  ? busy === "submit-proposal"
+                    ? "Waiting for wallet..."
+                    : liveSubmissionOpen
+                      ? "Submit private proposal on-chain"
+                      : "Round closed"
+                  : "Submit private proposal"}
               </button>
-              <p className="signal-helper">The sealed proposal carries total amount, timeline, approach, deliverables, and milestone plan. Before reveal, those fields stay hidden.</p>
+              <p className="signal-helper">{mode === "live" ? "Live proposals must be submitted before the commit deadline. Once the round is revealed or settled, it becomes read-only." : "The sealed proposal carries total amount, timeline, approach, deliverables, and milestone plan. Before reveal, those fields stay hidden."}</p>
             </div>
           ) : (
             <div className="pilot-form">
@@ -1583,8 +1635,33 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                       <div><dt>Release signer</dt><dd>{shortWallet(trustlessWorkDraft.releaseSigner)}</dd></div>
                       <div><dt>Dispute resolver</dt><dd>{shortWallet(trustlessWorkDraft.disputeResolver)}</dd></div>
                       <div><dt>Admin</dt><dd>{shortWallet(trustlessWorkDraft.admin)}</dd></div>
-                      <div><dt>Trustline</dt><dd>{trustlessWorkDraft.trustlineContractId || `${trustlessWorkDraft.trustlineSymbol} / ${shortWallet(trustlessWorkDraft.trustlineAddress)}`}</dd></div>
+                      <div><dt>Trustline</dt><dd>{trustlineSummary(resolveTrustlessWorkTrustline(trustlessWorkDraft))}</dd></div>
                     </dl>
+                  </div>
+                  <div className="trustless-work-action-rail">
+                    <div className="trustless-work-action-copy">
+                      <span>Escrow actions</span>
+                      <strong>Create, fund, refresh</strong>
+                      <p>Create the escrow first. Fund it after the contract ID returns, then refresh to pull the latest on-chain state.</p>
+                    </div>
+                    <div className="pilot-actions">
+                      <button type="button" className="primary-action" onClick={createTrustlessWorkEscrow} disabled={!selectedProposal || busy !== null || !twConfig}>
+                        <Sparkles size={16} />
+                        Create Multi-Release Escrow
+                      </button>
+                      <button type="button" className="secondary-action" onClick={fundTrustlessWorkEscrow} disabled={!trustlessWorkReceipt.escrowContractId || busy !== null || !twConfig}>
+                        <WalletCards size={16} />
+                        Fund escrow
+                      </button>
+                      <button type="button" className="secondary-action" onClick={refreshTrustlessWorkEscrow} disabled={!trustlessWorkReceipt.escrowContractId || busy !== null || !twConfig}>
+                        <RefreshCw size={16} />
+                        Refresh escrow
+                      </button>
+                    </div>
+                  </div>
+                  <div className="pilot-panel-heading trustless-work-advanced-heading">
+                    <span>Milestones</span>
+                    <strong>Proposed release plan</strong>
                   </div>
                   <div className="trustless-work-pilot-milestones">
                     {selectedProposal.data.milestones.map((milestone) => (
@@ -1597,6 +1674,10 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                         </div>
                       </div>
                     ))}
+                  </div>
+                  <div className="pilot-panel-heading trustless-work-advanced-heading">
+                    <span>Advanced</span>
+                    <strong>Roles, trustline, memo</strong>
                   </div>
                   <div className="pilot-form" style={{ paddingInline: 0 }}>
                     <label>
@@ -1640,39 +1721,26 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                     <div className="signal-form-grid">
                       <label>
                         Trustline contract ID
-                        <input value={trustlessWorkDraft.trustlineContractId} onChange={(event) => updateTrustlessWorkRole("trustlineContractId", event.target.value)} />
+                        <input placeholder="Canonical testnet USDC contract" value={trustlessWorkDraft.trustlineContractId} onChange={(event) => updateTrustlessWorkRole("trustlineContractId", event.target.value)} />
                       </label>
                       <label>
                         Trustline symbol
-                        <input value={trustlessWorkDraft.trustlineSymbol} onChange={(event) => updateTrustlessWorkRole("trustlineSymbol", event.target.value)} />
+                        <input placeholder="USDC" value={trustlessWorkDraft.trustlineSymbol} onChange={(event) => updateTrustlessWorkRole("trustlineSymbol", event.target.value)} />
                       </label>
                     </div>
                     <div className="signal-form-grid">
                       <label>
                         Trustline address
-                        <input value={trustlessWorkDraft.trustlineAddress} onChange={(event) => updateTrustlessWorkRole("trustlineAddress", event.target.value)} />
+                        <input placeholder="G... issuer or asset address" value={trustlessWorkDraft.trustlineAddress} onChange={(event) => updateTrustlessWorkRole("trustlineAddress", event.target.value)} />
                       </label>
                       <label>
                         Receiver memo
                         <input inputMode="numeric" value={trustlessWorkDraft.receiverMemo} onChange={(event) => updateTrustlessWorkRole("receiverMemo", event.target.value)} />
                       </label>
                     </div>
-                    <div className="pilot-actions">
-                      <button type="button" className="primary-action" onClick={createTrustlessWorkEscrow} disabled={!selectedProposal || busy !== null || !twConfig}>
-                        <Sparkles size={16} />
-                        Create Multi-Release Escrow
-                      </button>
-                      <button type="button" className="secondary-action" onClick={fundTrustlessWorkEscrow} disabled={!trustlessWorkReceipt.escrowContractId || busy !== null || !twConfig}>
-                        <WalletCards size={16} />
-                        Fund escrow
-                      </button>
-                    </div>
-                    <div className="pilot-actions">
-                      <button type="button" className="secondary-action" onClick={refreshTrustlessWorkEscrow} disabled={!trustlessWorkReceipt.escrowContractId || busy !== null || !twConfig}>
-                        <RefreshCw size={16} />
-                        Refresh escrow
-                      </button>
-                    </div>
+                    <p className="signal-helper trustless-work-trustline-note">
+                      The contract ID is prefilled with the canonical testnet USDC contract. Leave it alone unless you are testing a custom asset with a valid C... contract address.
+                    </p>
                   </div>
                 </>
               )}

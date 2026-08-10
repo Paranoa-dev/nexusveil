@@ -30,6 +30,84 @@
   justify-self: start;
 }
 
+.trustless-work-pilot-page .trustless-work-action-rail {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(142, 208, 178, 0.18);
+  border-radius: 8px;
+  background: rgba(11, 15, 22, 0.88);
+  box-shadow: var(--shadow-sm);
+}
+
+.trustless-work-pilot-page .trustless-work-action-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.trustless-work-pilot-page .trustless-work-action-copy span {
+  color: #8ed0b2;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.trustless-work-pilot-page .trustless-work-action-copy strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.trustless-work-pilot-page .trustless-work-action-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.trustless-work-pilot-page .trustless-work-action-rail .pilot-actions {
+  align-items: stretch;
+  padding: 0;
+  border-top: 0;
+}
+
+.trustless-work-pilot-page .trustless-work-action-rail .primary-action,
+.trustless-work-pilot-page .trustless-work-action-rail .secondary-action {
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.trustless-work-pilot-page .trustless-work-action-rail .pilot-actions button {
+  min-height: 42px;
+}
+
+@media (min-width: 721px) {
+  .trustless-work-pilot-page .trustless-work-action-rail .secondary-action {
+    flex: 1 1 calc(50% - 4px);
+  }
+}
+
+.trustless-work-pilot-page .trustless-work-advanced-heading {
+  margin-top: 8px;
+  min-height: 0;
+  padding: 4px 0 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.trustless-work-pilot-page .trustless-work-trustline-note {
+  margin: 2px 0 0;
+}
+
+@media (min-width: 721px) {
+  .trustless-work-pilot-page .trustless-work-action-rail {
+    position: sticky;
+    top: 16px;
+    z-index: 2;
+  }
+}
+
 @media (max-width: 760px) {
   .trustless-work-pilot-page .signal-pilot-flow {
     grid-template-columns: 1fr;
@@ -46,5 +124,9 @@
 
   .trustless-work-pilot-page .signal-pilot-flow > div > svg {
     display: none;
+  }
+
+  .trustless-work-pilot-page .trustless-work-action-rail {
+    position: static;
   }
 }

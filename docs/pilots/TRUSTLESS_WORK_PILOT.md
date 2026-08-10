@@ -63,6 +63,8 @@ Sample mode is UI-only and never claims real Sub Rosa or Trustless Work
 transactions. Live mode creates and reveals a real Core v2 `ReceiptOnly` round.
 Trustless Work actions require a configured API key and a connected Freighter
 wallet.
+The pilot preloads the canonical testnet USDC contract ID so the escrow form
+starts from a working default.
 
 ## Trustless Work Integration
 
@@ -103,7 +105,7 @@ and set:
 ```bash
 VITE_TRUSTLESS_WORK_BASE_URL=https://beta.api.trustlesswork.com
 VITE_TRUSTLESS_WORK_API_KEY=
-VITE_TRUSTLESS_WORK_TRUSTLINE_CONTRACT_ID=
+VITE_TRUSTLESS_WORK_TRUSTLINE_CONTRACT_ID=CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
 VITE_TRUSTLESS_WORK_TRUSTLINE_SYMBOL=USDC
 VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS=
 ```
