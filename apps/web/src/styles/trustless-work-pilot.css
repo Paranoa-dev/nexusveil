@@ -100,6 +100,48 @@
   margin: 2px 0 0;
 }
 
+.trustless-work-pilot-page .trustless-work-funding-warning {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 16px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 13px 14px;
+  border: 1px solid rgba(217, 171, 92, 0.34);
+  border-radius: 8px;
+  background: rgba(217, 171, 92, 0.07);
+}
+
+.trustless-work-pilot-page .trustless-work-funding-warning strong,
+.trustless-work-pilot-page .trustless-work-funding-warning span {
+  min-width: 0;
+  white-space: normal;
+}
+
+.trustless-work-pilot-page .trustless-work-funding-warning strong {
+  grid-column: 1;
+  color: #f0d39a;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.trustless-work-pilot-page .trustless-work-funding-warning span {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.trustless-work-pilot-page .trustless-work-funding-warning button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: auto;
+  min-width: 176px;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
 .trustless-work-pilot-page .trustless-work-live-round-status {
   align-items: flex-start;
 }
@@ -151,5 +193,20 @@
 
   .trustless-work-pilot-page .trustless-work-action-rail {
     position: static;
+  }
+
+  .trustless-work-pilot-page .trustless-work-funding-warning {
+    grid-template-columns: 1fr;
+  }
+
+  .trustless-work-pilot-page .trustless-work-funding-warning strong,
+  .trustless-work-pilot-page .trustless-work-funding-warning span,
+  .trustless-work-pilot-page .trustless-work-funding-warning button {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .trustless-work-pilot-page .trustless-work-funding-warning button {
+    width: 100%;
   }
 }

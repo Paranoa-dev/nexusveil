@@ -1698,7 +1698,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           alreadyRevealedCount += 1;
         }
       }
-      await refreshLiveWithRetry(liveRoundId, { attempts: 10, delayMs: 1200 }).catch(() => null);
+      void refreshLiveWithRetry(liveRoundId, { attempts: 10, delayMs: 1200 }).catch(() => null);
       toast.push(
         "success",
         "Proposals revealed",
