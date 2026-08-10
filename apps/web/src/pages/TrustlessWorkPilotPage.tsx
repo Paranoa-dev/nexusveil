@@ -311,6 +311,15 @@ function isTxBadSeqError(error: unknown): boolean {
   );
 }
 
+function isRoundReadPendingError(error: unknown): boolean {
+  const message = transactionErrorText(error);
+  return message.includes("not visible from the Stellar RPC yet") || isRoundNotFoundError(error);
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function roundInputIssue(value: string, nextRoundId: string | null): string | null {
   const input = value.trim();
   if (!input) return null;
@@ -827,7 +836,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       const hashRoundId = roomHashRoundId();
       if (hashRoundId !== liveRoundId) {
         setMode("live");
-        void refreshLive(hashRoundId).catch((error) => {
+        void refreshLiveWithRetry(hashRoundId).catch((error) => {
           toast.push("error", "Live round load failed", displayError(error));
         });
       }
@@ -846,7 +855,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
 
   useEffect(() => {
     if (mode === "live" && reader && liveRoundId) {
-      void refreshLive(liveRoundId).catch((error) => {
+      void refreshLiveWithRetry(liveRoundId).catch((error) => {
         toast.push("error", "Live round load failed", displayError(error));
       });
     }
@@ -886,7 +895,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           "Wallet sequence refreshed",
           "Retrying with the latest Stellar account sequence.",
         );
-        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        await wait(900);
       }
     }
     throw lastError instanceof Error
@@ -918,7 +927,13 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     if (!reader) return null;
     setRoundProbeBusy(true);
     try {
-      const next = await findNextLiveRoundId();
+      const probedNext = await findNextLiveRoundId();
+      const activeMinimum = activeLiveRoundId && /^\d+$/.test(activeLiveRoundId)
+        ? (BigInt(activeLiveRoundId) + 1n).toString()
+        : null;
+      const next = activeMinimum && BigInt(probedNext) < BigInt(activeMinimum)
+        ? activeMinimum
+        : probedNext;
       const nextInput = options.syncInput ? next : roundInput;
       setNextLiveRoundId(next);
       if (options.syncInput) setRoundInput(next);
@@ -983,7 +998,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     try {
       const roundTx = await reader.get_round_v2({ round_id: rid });
       if (isContractResultErr(roundTx.result)) {
-        throw new Error(`Round #${target} was not found on Core v2.`);
+        throw new Error(`Round #${target} is not visible from the Stellar RPC yet.`);
       }
       const nextRound = roundTx.result.unwrap();
       if (request !== refreshRequest.current) return;
@@ -1026,6 +1041,30 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     }
   }
 
+  async function refreshLiveWithRetry(
+    target = liveRoundId,
+    options: { attempts?: number; delayMs?: number } = {},
+  ) {
+    if (!target) return;
+    const attempts = options.attempts ?? 8;
+    const delayMs = options.delayMs ?? 1250;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        await refreshLive(target);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!isRoundReadPendingError(error) || attempt === attempts - 1) throw error;
+        setLiveLoadError(`Round #${target} was created. Waiting for Stellar RPC to catch up...`);
+        await wait(delayMs);
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(displayError(lastError));
+  }
+
   async function reloadActiveRound() {
     const target = activeLiveRoundId;
     if (!target) {
@@ -1034,7 +1073,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     }
     setBusy("load-round");
     try {
-      await refreshLive(target);
+      await refreshLiveWithRetry(target);
       toast.push("success", "Live round loaded", `ReceiptOnly round #${target}`);
     } catch (error) {
       toast.push("error", "Live round load failed", displayError(error));
@@ -1109,14 +1148,17 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       if (hash) rememberTransaction(hash);
       setMode("live");
       setRoundId(nextId);
+      setRound(null);
+      setLiveProposals([]);
+      setSelectedProposalId(null);
       const followingId = (BigInt(nextId) + 1n).toString();
       setNextLiveRoundId(followingId);
       setRoundInput(followingId);
       setRoundInputWarning("");
       setDeadlineAt((revealAt - 10) * 1000);
+      setLiveLoadError(`Round #${nextId} was created. Waiting for Stellar RPC to catch up...`);
       window.location.hash = `#/pilot/trustless-work/${nextId}`;
-      await refreshLive(nextId);
-      toast.push("success", "Live round created", `ReceiptOnly round #${nextId}`);
+      toast.push("success", "Live round created", `ReceiptOnly round #${nextId}. Loading it now.`);
     } catch (error) {
       toast.push("error", "Round creation failed", displayError(error));
     } finally {
@@ -1822,6 +1864,21 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                   </div>
                 ))}
               </div>
+              {mode === "live" && (
+                <div className="signal-provider-callout trustless-work-live-round-status">
+                  <RefreshCw size={18} />
+                  <div>
+                    <strong>{activeLiveRoundId ? `Live round #${activeLiveRoundId}` : "No live round selected"}</strong>
+                    <p>{round ? (liveLoadError || "Round data is ready for provider submission.") : (liveLoadError || "Load the live round before submitting a private proposal.")}</p>
+                    {!round && activeLiveRoundId && (
+                      <button type="button" className="secondary-action compact" onClick={reloadActiveRound} disabled={busy !== null}>
+                        <RefreshCw size={14} />
+                        {busy === "load-round" ? "Loading..." : "Reload round"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               <button type="button" className="primary-action" onClick={mode === "live" ? submitLiveProposal : createSampleProposal} disabled={busy !== null || (mode === "live" && (!round || !liveRoundId || !liveSubmissionOpen))}>
                 <LockKeyhole size={16} />
                 {mode === "live"
@@ -1844,21 +1901,6 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                 <div><dt>Status</dt><dd>{sampleStatusLabel(status)}</dd></div>
                 <div><dt>Trustless Work</dt><dd>{twConfig ? twConfig.baseUrl : "Config missing"}</dd></div>
               </div>
-              {mode === "live" && (
-                <div className="signal-provider-callout trustless-work-live-round-status">
-                  <RefreshCw size={18} />
-                  <div>
-                    <strong>{activeLiveRoundId ? `Live round #${activeLiveRoundId}` : "No live round selected"}</strong>
-                    <p>{round ? (liveLoadError || "Round data is ready for provider submission.") : (liveLoadError || "Load the live round before submitting a private proposal.")}</p>
-                    {!round && activeLiveRoundId && (
-                      <button type="button" className="secondary-action compact" onClick={reloadActiveRound} disabled={busy !== null}>
-                        <RefreshCw size={14} />
-                        {busy === "load-round" ? "Loading..." : "Reload round"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
               {selectedProposal && (
                 <>
                   <div className="signal-private-state">
