@@ -746,6 +746,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const [address, setAddress] = useState<string | null>(null);
   const [round, setRound] = useState<RoundV2 | null>(null);
   const [liveProposals, setLiveProposals] = useState<ProposalRecord[]>([]);
+  const [liveLoadError, setLiveLoadError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [roundProbeBusy, setRoundProbeBusy] = useState(false);
   const [nextLiveRoundId, setNextLiveRoundId] = useState<string | null>(null);
@@ -769,7 +770,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     : proposals.some((entry) => entry.revealed);
   const roundDeadlineAt = mode === "live" && round ? Number(round.commit_deadline) * 1000 : deadlineAt;
   const roundCountdown = formatDeadline(roundDeadlineAt, now);
-  const liveSubmissionOpen = mode !== "live" || round?.status.tag === "Open";
+  const liveSubmissionOpen = mode !== "live" || Boolean(round && round.status.tag === "Open" && Number(round.commit_deadline) * 1000 > now);
   const liveBidderCount = round?.bidders.length ?? 0;
   const participantCount = mode === "live" ? liveBidderCount : proposals.length;
   const currentRoundInputIssue = mode === "live"
@@ -783,6 +784,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         ? "ready"
         : "collecting";
   const activeTxHashes = transactionHashes.length > 0 ? transactionHashes : saved.transactionHashes;
+  const routeRoundId = roomHashRoundId();
+  const activeLiveRoundId = liveRoundId || routeRoundId;
 
   useEffect(() => {
     savePersistedState({
@@ -977,33 +980,67 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     if (!reader || !target || !/^\d+$/.test(target)) return;
     const request = ++refreshRequest.current;
     const rid = BigInt(target);
-    const roundTx = await reader.get_round_v2({ round_id: rid });
-    const nextRound = roundTx.result.unwrap();
-    const revealed = await Promise.all(
-      nextRound.bidders.map(async (bidder) => {
-        const state = (await reader.get_submission_v2({ round_id: rid, bidder })).result.unwrap();
-        if (state.revealed_envelope == null) return null;
-        return liveProposalFromSubmission(
-          decodePilotSubmission(
-            bidder,
-            nextRound.mode.tag,
-            new Uint8Array(state.revealed_envelope),
-            state.valid,
-          ),
-        );
-      }),
-    );
-    if (request !== refreshRequest.current) return;
-    setRound(nextRound);
-    setDeadlineAt(Number(nextRound.commit_deadline) * 1000);
-    const revealedEntries = revealed.filter((entry): entry is ProposalRecord => entry !== null);
-    setLiveProposals(revealedEntries);
-    setRoundId(target);
-    setProposals((current) => (
-      current.some((entry) => entry.source === "live")
-        ? current.filter((entry) => entry.source !== "live").concat(revealedEntries)
-        : current.concat(revealedEntries)
-    ));
+    try {
+      const roundTx = await reader.get_round_v2({ round_id: rid });
+      if (isContractResultErr(roundTx.result)) {
+        throw new Error(`Round #${target} was not found on Core v2.`);
+      }
+      const nextRound = roundTx.result.unwrap();
+      if (request !== refreshRequest.current) return;
+      setRound(nextRound);
+      setDeadlineAt(Number(nextRound.commit_deadline) * 1000);
+      setRoundId(target);
+      setLiveLoadError("");
+
+      const revealed = await Promise.all(
+        nextRound.bidders.map(async (bidder) => {
+          try {
+            const state = (await reader.get_submission_v2({ round_id: rid, bidder })).result.unwrap();
+            if (state.revealed_envelope == null) return null;
+            return liveProposalFromSubmission(
+              decodePilotSubmission(
+                bidder,
+                nextRound.mode.tag,
+                new Uint8Array(state.revealed_envelope),
+                state.valid,
+              ),
+            );
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (request !== refreshRequest.current) return;
+      const revealedEntries = revealed.filter((entry): entry is ProposalRecord => entry !== null);
+      setLiveProposals(revealedEntries);
+      setProposals((current) => (
+        current.some((entry) => entry.source === "live")
+          ? current.filter((entry) => entry.source !== "live").concat(revealedEntries)
+          : current.concat(revealedEntries)
+      ));
+    } catch (error) {
+      if (request === refreshRequest.current) {
+        setLiveLoadError(displayError(error) || `Round #${target} could not be loaded.`);
+      }
+      throw error;
+    }
+  }
+
+  async function reloadActiveRound() {
+    const target = activeLiveRoundId;
+    if (!target) {
+      toast.push("error", "Live round missing", "Create a live round or open the copied round link first.");
+      return;
+    }
+    setBusy("load-round");
+    try {
+      await refreshLive(target);
+      toast.push("success", "Live round loaded", `ReceiptOnly round #${target}`);
+    } catch (error) {
+      toast.push("error", "Live round load failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
   }
 
   function liveProposalFromSubmission(submission: PilotSubmissionView): ProposalRecord {
@@ -1107,6 +1144,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     setTransactionHashes([]);
     setRound(null);
     setLiveProposals([]);
+    setLiveLoadError("");
     window.location.hash = "#/pilot/trustless-work";
   }
 
@@ -1789,9 +1827,11 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                 {mode === "live"
                   ? busy === "submit-proposal"
                     ? "Waiting for wallet..."
-                    : liveSubmissionOpen
-                      ? "Submit private proposal on-chain"
-                      : "Round closed"
+                    : !round || !liveRoundId
+                      ? "Load live round first"
+                      : liveSubmissionOpen
+                        ? "Submit private proposal on-chain"
+                        : "Round closed"
                   : "Submit private proposal"}
               </button>
               <p className="signal-helper">{mode === "live" ? "Live proposals must be submitted before the commit deadline. Once the round is revealed or settled, it becomes read-only." : "The sealed proposal carries total amount, timeline, approach, deliverables, and milestone plan. Before reveal, those fields stay hidden."}</p>
@@ -1804,6 +1844,21 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                 <div><dt>Status</dt><dd>{sampleStatusLabel(status)}</dd></div>
                 <div><dt>Trustless Work</dt><dd>{twConfig ? twConfig.baseUrl : "Config missing"}</dd></div>
               </div>
+              {mode === "live" && (
+                <div className="signal-provider-callout trustless-work-live-round-status">
+                  <RefreshCw size={18} />
+                  <div>
+                    <strong>{activeLiveRoundId ? `Live round #${activeLiveRoundId}` : "No live round selected"}</strong>
+                    <p>{round ? (liveLoadError || "Round data is ready for provider submission.") : (liveLoadError || "Load the live round before submitting a private proposal.")}</p>
+                    {!round && activeLiveRoundId && (
+                      <button type="button" className="secondary-action compact" onClick={reloadActiveRound} disabled={busy !== null}>
+                        <RefreshCw size={14} />
+                        {busy === "load-round" ? "Loading..." : "Reload round"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               {selectedProposal && (
                 <>
                   <div className="signal-private-state">
