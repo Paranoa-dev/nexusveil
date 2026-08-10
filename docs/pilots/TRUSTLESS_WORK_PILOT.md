@@ -111,6 +111,8 @@ VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS=
 ```
 
 `VITE_TRUSTLESS_WORK_API_KEY` is required for real Trustless Work requests.
+It must be a Core v2 beta Testnet key for `https://beta.api.trustlesswork.com`;
+Version 1 `dev.api`/`api` keys are not interchangeable with the beta Core API.
 Trustline values can be edited in the pilot UI before deploy.
 
 The Sub Rosa live path also requires the normal Core v2 web config:

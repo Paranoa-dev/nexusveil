@@ -4,7 +4,10 @@ import { Buffer } from "buffer";
 import { StrKey } from "@stellar/stellar-sdk";
 
 import {
+  formatTrustlessWorkApiError,
   readContractId,
+  resolveTrustlessWorkConfig,
+  TrustlessWorkApiError,
   trustlessWorkConfigIssues,
   validateTrustlessWorkDeployPayload,
 } from "./index.js";
@@ -121,4 +124,34 @@ test("reports missing Trustless Work config without guessing values", () => {
     ["VITE_TRUSTLESS_WORK_API_KEY is missing."],
   );
   assert.equal(readContractId({ contractId: "C123" }), "C123");
+});
+
+test("normalizes Trustless Work env values", () => {
+  assert.deepEqual(
+    resolveTrustlessWorkConfig({
+      VITE_TRUSTLESS_WORK_BASE_URL: " https://beta.api.trustlesswork.com/ ",
+      VITE_TRUSTLESS_WORK_API_KEY: " 'id.secret' ",
+    }),
+    {
+      baseUrl: "https://beta.api.trustlesswork.com",
+      apiKey: "id.secret",
+    },
+  );
+});
+
+test("explains beta Core API key mismatch clearly", () => {
+  const message = formatTrustlessWorkApiError(
+    new TrustlessWorkApiError("Invalid API key", {
+      status: 401,
+      title: "Unauthorized",
+      code: "AUTH_INVALID_CREDENTIAL",
+      detail: "Invalid API key",
+      traceId: "trace-123",
+    }),
+    { baseUrl: "https://beta.api.trustlesswork.com" },
+  );
+
+  assert.match(message, /Core v2 beta Testnet key/);
+  assert.match(message, /Version 1\/dev\/mainnet keys/);
+  assert.match(message, /trace-123/);
 });

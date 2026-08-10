@@ -122,13 +122,17 @@ function trimUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
 
+function normalizeEnvValue(value: string | undefined): string {
+  return (value ?? "").trim().replace(/^['"]|['"]$/g, "");
+}
+
 export function resolveTrustlessWorkConfig(
   env: Record<string, string | undefined> = import.meta.env,
 ): TrustlessWorkConfig | null {
-  const apiKey = env.VITE_TRUSTLESS_WORK_API_KEY?.trim();
+  const apiKey = normalizeEnvValue(env.VITE_TRUSTLESS_WORK_API_KEY);
   if (!apiKey) return null;
   return {
-    baseUrl: trimUrl(env.VITE_TRUSTLESS_WORK_BASE_URL || DEFAULT_BASE_URL),
+    baseUrl: trimUrl(normalizeEnvValue(env.VITE_TRUSTLESS_WORK_BASE_URL) || DEFAULT_BASE_URL),
     apiKey,
   };
 }
@@ -137,14 +141,51 @@ export function trustlessWorkConfigIssues(
   env: Record<string, string | undefined> = import.meta.env,
 ): string[] {
   const issues: string[] = [];
-  if (!env.VITE_TRUSTLESS_WORK_API_KEY?.trim()) {
+  if (!normalizeEnvValue(env.VITE_TRUSTLESS_WORK_API_KEY)) {
     issues.push("VITE_TRUSTLESS_WORK_API_KEY is missing.");
   }
-  const baseUrl = env.VITE_TRUSTLESS_WORK_BASE_URL?.trim();
+  const baseUrl = normalizeEnvValue(env.VITE_TRUSTLESS_WORK_BASE_URL);
   if (baseUrl && !/^https?:\/\//.test(baseUrl)) {
     issues.push("VITE_TRUSTLESS_WORK_BASE_URL must be a valid URL.");
   }
   return issues;
+}
+
+function listExtension(value: unknown): string {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).join(", ")
+    : "";
+}
+
+function traceSuffix(error: TrustlessWorkApiError): string {
+  return error.traceId ? ` Trace ID: ${error.traceId}` : "";
+}
+
+export function formatTrustlessWorkApiError(
+  error: unknown,
+  config?: Pick<TrustlessWorkConfig, "baseUrl">,
+): string {
+  if (!(error instanceof TrustlessWorkApiError)) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  const detail = error.details?.detail || error.message;
+  const location = config?.baseUrl ? ` at ${config.baseUrl}` : "";
+  if (error.code === "AUTH_INVALID_CREDENTIAL" || (error.status === 401 && /invalid api key/i.test(detail))) {
+    return `Trustless Work rejected this API key${location}. Use a Core v2 beta Testnet key for beta.api.trustlesswork.com; Version 1/dev/mainnet keys are not interchangeable.${traceSuffix(error)}`;
+  }
+
+  if (error.code === "AUTH_CREDENTIAL_MISSING") {
+    return `Trustless Work did not receive an API key. Set VITE_TRUSTLESS_WORK_API_KEY to a Core v2 beta Testnet key.${traceSuffix(error)}`;
+  }
+
+  if (error.code === "AUTH_INSUFFICIENT_ROLE") {
+    const required = listExtension(error.details?.extensions?.requiredAnyOf);
+    const present = listExtension(error.details?.extensions?.present);
+    return `Trustless Work accepted the key, but the key is missing the required role${required ? `: ${required}` : ""}.${present ? ` Present roles: ${present}.` : ""}${traceSuffix(error)}`;
+  }
+
+  return `${error.code ? `${error.code}: ` : ""}${detail}${traceSuffix(error)}`;
 }
 
 function stellarKey(value: string | undefined, label: string): string {

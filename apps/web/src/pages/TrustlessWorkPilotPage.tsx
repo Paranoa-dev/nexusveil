@@ -61,6 +61,7 @@ import {
   fundMultiReleaseEscrow,
   getEscrowByContractId,
   readContractId,
+  formatTrustlessWorkApiError,
   resolveTrustlessWorkConfig,
   sendSignedTransaction,
   trustlessWorkConfigIssues,
@@ -1597,7 +1598,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         toast.push("success", "Trustless Work escrow created", submit.contractId ? shortHash(submit.contractId) : "Escrow submitted");
       }
     } catch (error) {
-      toast.push("error", "Escrow creation failed", displayError(error));
+      toast.push("error", "Escrow creation failed", formatTrustlessWorkApiError(error, twConfig));
     } finally {
       setBusy(null);
     }
@@ -1646,7 +1647,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       rememberTransaction(submit.txHash);
       toast.push("success", "Escrow funding submitted", submit.message || "Funding tx submitted to Stellar");
     } catch (error) {
-      toast.push("error", "Escrow funding failed", displayError(error));
+      toast.push("error", "Escrow funding failed", formatTrustlessWorkApiError(error, twConfig));
     } finally {
       setBusy(null);
     }
@@ -1664,7 +1665,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       }));
       toast.push("success", "Escrow refreshed", shortHash(trustlessWorkReceipt.escrowContractId));
     } catch (error) {
-      toast.push("error", "Escrow refresh failed", displayError(error));
+      toast.push("error", "Escrow refresh failed", formatTrustlessWorkApiError(error, twConfig));
     } finally {
       setBusy(null);
     }
