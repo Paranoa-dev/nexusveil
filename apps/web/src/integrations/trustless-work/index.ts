@@ -1,4 +1,5 @@
-import { StrKey } from "@stellar/stellar-sdk";
+import { StrKey, TransactionBuilder } from "@stellar/stellar-sdk";
+import { Buffer } from "buffer";
 
 export interface TrustlessWorkConfig {
   baseUrl: string;
@@ -59,10 +60,13 @@ export interface TrustlessWorkSendTransactionResponse {
   txHash?: string | null;
   ledger?: number;
   contractId?: string;
+  resultMetaXdr?: string;
+  envelopeXdr?: string;
   escrow?: TrustlessWorkEscrowSnapshot;
   code?: "STELLAR_TX_SUBMITTED" | "STELLAR_TX_SUBMITTED_INDEXER_LAGGING";
   message?: string;
   status?: string;
+  [key: string]: unknown;
 }
 
 export interface TrustlessWorkEscrowSnapshot {
@@ -225,7 +229,11 @@ export function formatTrustlessWorkApiError(
   }
 
   if (/trustline|asset trust|required asset|receiver/i.test(detail) && /could not be validated|does not have|missing|required/i.test(detail)) {
-    return `Trustless Work accepted the key, but a wallet in the escrow does not satisfy the selected asset trustline. For v1 testnet, every role wallet and milestone receiver must be a real funded testnet wallet with a USDC trustline. Original error: ${detail}${traceSuffix(error)}`;
+    return `Trustless Work accepted the key, but a wallet in the escrow does not satisfy the selected asset trustline. The issuer address in Advanced only identifies USDC; it is not the receiver wallet. Add a USDC trustline to the real provider wallet and every milestone receiver, then retry. Original error: ${detail}${traceSuffix(error)}`;
+  }
+
+  if (/resultMetaXdr|result meta xdr|transaction response is missing/i.test(detail)) {
+    return `Trustless Work may have submitted the transaction but returned incomplete Stellar metadata. The app will verify the transaction on Testnet before reporting failure.${traceSuffix(error)}`;
   }
 
   return `${error.code ? `${error.code}: ` : ""}${detail}${traceSuffix(error)}`;
@@ -476,10 +484,41 @@ function normalizeUnsignedTransactionResponse(
 function normalizeSendTransactionResponse(
   response: TrustlessWorkSendTransactionResponse & { hash?: string },
 ): TrustlessWorkSendTransactionResponse {
+  const nested = response.sendTransactionResponse && typeof response.sendTransactionResponse === "object"
+    ? response.sendTransactionResponse as TrustlessWorkSendTransactionResponse & { hash?: string }
+    : response.data && typeof response.data === "object"
+      ? response.data as TrustlessWorkSendTransactionResponse & { hash?: string }
+      : response;
   return {
     ...response,
-    txHash: response.txHash ?? response.hash ?? null,
+    ...nested,
+    txHash: nested.txHash ?? nested.hash ?? null,
   };
+}
+
+export function hashSignedTransaction(signedXdr: string, networkPassphrase: string): string {
+  const transaction = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
+  return Buffer.from(transaction.hash()).toString("hex");
+}
+
+export async function waitForTestnetTransaction(
+  txHash: string,
+  options: { attempts?: number; delayMs?: number; horizonUrl?: string } = {},
+): Promise<boolean> {
+  const attempts = options.attempts ?? 8;
+  const delayMs = options.delayMs ?? 1000;
+  const horizonUrl = (options.horizonUrl ?? "https://horizon-testnet.stellar.org").replace(/\/+$/, "");
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await fetch(`${horizonUrl}/transactions/${encodeURIComponent(txHash)}`);
+    if (response.ok) return true;
+    if (response.status !== 404) {
+      throw new Error(`Testnet transaction lookup failed with HTTP ${response.status}.`);
+    }
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
+    }
+  }
+  return false;
 }
 
 function normalizeGetEscrowResponse(response: unknown): TrustlessWorkGetEscrowResponse {

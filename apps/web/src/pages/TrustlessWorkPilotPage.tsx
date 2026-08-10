@@ -60,10 +60,12 @@ import {
   buildMultiReleaseEscrow,
   fundMultiReleaseEscrow,
   getEscrowByContractId,
+  hashSignedTransaction,
   readContractId,
   formatTrustlessWorkApiError,
   resolveTrustlessWorkConfig,
   sendSignedTransaction,
+  waitForTestnetTransaction,
   trustlessWorkConfigIssues,
   type TrustlessWorkApiVersion,
   type TrustlessWorkDeployMultiReleasePayload,
@@ -697,6 +699,32 @@ function txHashFromResult(result: unknown): string | null {
   const hash = (result as { sendTransactionResponse?: { hash?: unknown } })
     .sendTransactionResponse?.hash;
   return typeof hash === "string" && hash ? hash : null;
+}
+
+async function sendTrustlessWorkTransaction(
+  config: NonNullable<ReturnType<typeof resolveTrustlessWorkConfig>>,
+  signedXdr: string,
+): Promise<TrustlessWorkSendTransactionResponse> {
+  try {
+    return await sendSignedTransaction(config, signedXdr);
+  } catch (error) {
+    const message = displayError(error);
+    if (config.apiVersion !== "v1" || !/resultMetaXdr|result meta xdr|transaction response is missing/i.test(message)) {
+      throw error;
+    }
+
+    const txHash = hashSignedTransaction(signedXdr, NETWORK);
+    const submitted = await waitForTestnetTransaction(txHash);
+    if (!submitted) {
+      throw new Error(`Trustless Work returned incomplete transaction metadata and Testnet could not find the transaction yet. Retry in a few seconds. Hash: ${txHash}`);
+    }
+    return {
+      txHash,
+      status: "submitted",
+      code: "STELLAR_TX_SUBMITTED_INDEXER_LAGGING",
+      message: "Transaction is on Stellar Testnet; Trustless Work metadata is still catching up.",
+    };
+  }
 }
 
 function trustlessWorkRolesFromDraft(
@@ -1702,7 +1730,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       });
       const signedError = freighterError(signed);
       if (signedError) throw new Error(signedError);
-      const submit = await sendSignedTransaction(twConfig, signed.signedTxXdr);
+      const submit = await sendTrustlessWorkTransaction(twConfig, signed.signedTxXdr);
       const escrowContractId = submit.contractId ?? contractIdFromBuild ?? null;
       setTrustlessWorkReceipt((current) => ({
         ...current,
@@ -1757,7 +1785,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       });
       const signedError = freighterError(signed);
       if (signedError) throw new Error(signedError);
-      const submit = await sendSignedTransaction(twConfig, signed.signedTxXdr);
+      const submit = await sendTrustlessWorkTransaction(twConfig, signed.signedTxXdr);
       setTrustlessWorkReceipt((current) => ({
         ...current,
         fundBuild: build,
@@ -2327,7 +2355,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                     </div>
                     <p className="signal-helper trustless-work-trustline-note">
                       {isTrustlessWorkV1
-                        ? "V1 dev API uses symbol + issuer address. Milestone receivers must be real testnet wallets with a USDC trustline."
+                        ? "USDC issuer is only the token identifier. The provider and every milestone receiver must be real funded Testnet wallets with their own USDC trustline."
                         : "The contract ID is prefilled with the canonical testnet USDC contract. Leave it alone unless you are testing a custom asset with a valid C... contract address."}
                     </p>
                   </div>
