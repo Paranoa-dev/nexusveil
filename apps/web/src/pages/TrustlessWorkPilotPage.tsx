@@ -754,6 +754,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const [transactionHashes, setTransactionHashes] = useState<string[]>(saved.transactionHashes);
   const [address, setAddress] = useState<string | null>(null);
   const [round, setRound] = useState<RoundV2 | null>(null);
+  const [loadedRoundId, setLoadedRoundId] = useState<string | null>(null);
   const [liveProposals, setLiveProposals] = useState<ProposalRecord[]>([]);
   const [liveLoadError, setLiveLoadError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -771,16 +772,17 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const liveRoundId = roundId;
   const revealCountdown = useDrandCountdown(round ? Number(round.reveal_round) : 0);
   const selectedProposal = (mode === "live" ? liveProposals : proposals).find((entry) => entry.id === selectedProposalId) ?? null;
+  const activeRoundReady = mode !== "live" || Boolean(round && liveRoundId && loadedRoundId === liveRoundId);
   const deadlinePassed = mode === "live"
-    ? Boolean(round && (round.status.tag !== "Open" || Number(round.commit_deadline) * 1000 <= now))
+    ? Boolean(activeRoundReady && round && (round.status.tag !== "Open" || Number(round.commit_deadline) * 1000 <= now))
     : deadlineAt <= now;
   const revealed = mode === "live"
-    ? Boolean(round && (round.status.tag === "Revealing" || round.status.tag === "Cleared" || round.status.tag === "Settled"))
+    ? Boolean(activeRoundReady && round && (round.status.tag === "Revealing" || round.status.tag === "Cleared" || round.status.tag === "Settled"))
     : proposals.some((entry) => entry.revealed);
-  const roundDeadlineAt = mode === "live" && round ? Number(round.commit_deadline) * 1000 : deadlineAt;
+  const roundDeadlineAt = mode === "live" && activeRoundReady && round ? Number(round.commit_deadline) * 1000 : deadlineAt;
   const roundCountdown = formatDeadline(roundDeadlineAt, now);
-  const liveSubmissionOpen = mode !== "live" || Boolean(round && round.status.tag === "Open" && Number(round.commit_deadline) * 1000 > now);
-  const liveBidderCount = round?.bidders.length ?? 0;
+  const liveSubmissionOpen = mode !== "live" || Boolean(activeRoundReady && round && round.status.tag === "Open" && Number(round.commit_deadline) * 1000 > now);
+  const liveBidderCount = activeRoundReady ? round?.bidders.length ?? 0 : 0;
   const participantCount = mode === "live" ? liveBidderCount : proposals.length;
   const currentRoundInputIssue = mode === "live"
     ? roundInputIssue(roundInput, nextLiveRoundId)
@@ -795,6 +797,15 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const activeTxHashes = transactionHashes.length > 0 ? transactionHashes : saved.transactionHashes;
   const routeRoundId = roomHashRoundId();
   const activeLiveRoundId = liveRoundId || routeRoundId;
+  const connectedWalletIsRoundOperator = Boolean(activeRoundReady && round && address && round.operator === address);
+  const connectedWalletAlreadySubmitted = Boolean(activeRoundReady && round && address && round.bidders.includes(address));
+  const liveProviderRoundMessage = activeRoundReady
+    ? connectedWalletAlreadySubmitted
+      ? "This wallet is already counted as 1 participant. Submitting again updates the same sealed proposal."
+      : connectedWalletIsRoundOperator
+        ? "This is the organizer wallet. For the clean pilot flow, switch Freighter to a provider wallet before submitting."
+        : liveLoadError || "Round data is ready for provider submission."
+    : liveLoadError || "Load the live round before submitting a private proposal.";
 
   useEffect(() => {
     savePersistedState({
@@ -852,6 +863,13 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         : { ...current, serviceProvider: selectedProposal.wallet }
     ));
   }, [selectedProposal?.wallet]);
+
+  useEffect(() => {
+    if (mode !== "live") return;
+    if (selectedProposal) return;
+    if (liveProposals.length !== 1) return;
+    setSelectedProposalId(liveProposals[0].id);
+  }, [mode, liveProposals, selectedProposal]);
 
   useEffect(() => {
     if (mode === "live" && reader && liveRoundId) {
@@ -991,8 +1009,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     }
   }
 
-  async function refreshLive(target = liveRoundId) {
-    if (!reader || !target || !/^\d+$/.test(target)) return;
+  async function refreshLive(target = liveRoundId): Promise<RoundV2 | null> {
+    if (!reader || !target || !/^\d+$/.test(target)) return null;
     const request = ++refreshRequest.current;
     const rid = BigInt(target);
     try {
@@ -1001,8 +1019,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         throw new Error(`Round #${target} is not visible from the Stellar RPC yet.`);
       }
       const nextRound = roundTx.result.unwrap();
-      if (request !== refreshRequest.current) return;
+      if (request !== refreshRequest.current) return null;
       setRound(nextRound);
+      setLoadedRoundId(target);
       setDeadlineAt(Number(nextRound.commit_deadline) * 1000);
       setRoundId(target);
       setLiveLoadError("");
@@ -1025,7 +1044,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           }
         }),
       );
-      if (request !== refreshRequest.current) return;
+      if (request !== refreshRequest.current) return null;
       const revealedEntries = revealed.filter((entry): entry is ProposalRecord => entry !== null);
       setLiveProposals(revealedEntries);
       setProposals((current) => (
@@ -1033,9 +1052,15 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           ? current.filter((entry) => entry.source !== "live").concat(revealedEntries)
           : current.concat(revealedEntries)
       ));
+      return nextRound;
     } catch (error) {
       if (request === refreshRequest.current) {
         setLiveLoadError(displayError(error) || `Round #${target} could not be loaded.`);
+        if (target === liveRoundId) {
+          setRound(null);
+          setLoadedRoundId(null);
+          setLiveProposals([]);
+        }
       }
       throw error;
     }
@@ -1044,15 +1069,14 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   async function refreshLiveWithRetry(
     target = liveRoundId,
     options: { attempts?: number; delayMs?: number } = {},
-  ) {
-    if (!target) return;
+  ): Promise<RoundV2 | null> {
+    if (!target) return null;
     const attempts = options.attempts ?? 8;
     const delayMs = options.delayMs ?? 1250;
     let lastError: unknown;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        await refreshLive(target);
-        return;
+        return await refreshLive(target);
       } catch (error) {
         lastError = error;
         if (!isRoundReadPendingError(error) || attempt === attempts - 1) throw error;
@@ -1080,6 +1104,43 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     } finally {
       setBusy(null);
     }
+  }
+
+  async function requireLoadedOpenRound(target: string): Promise<RoundV2> {
+    const nextRound = await refreshLiveWithRetry(target, { attempts: 12, delayMs: 1000 });
+    if (!nextRound) throw new Error(`Round #${target} is still loading. Wait a moment, then reload the round.`);
+    if (nextRound.status.tag !== "Open") {
+      throw new Error(
+        `This round is no longer accepting offers (current status: ${nextRound.status.tag}). Create a fresh live round and submit before the deadline.`,
+      );
+    }
+    if (Number(nextRound.commit_deadline) * 1000 <= nowMs()) {
+      throw new Error("Commit window closed. Create a fresh round and submit before the timer reaches zero.");
+    }
+    return nextRound;
+  }
+
+  async function sendCommitWithRoundRetry(
+    target: string,
+    args: Parameters<NonNullable<typeof contract>["commit_v2"]>[0],
+  ) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        return await signAndSendWithSequenceRetry(() => contract!.commit_v2(args));
+      } catch (error) {
+        lastError = error;
+        if (!isRoundReadPendingError(error) || attempt === 5) throw error;
+        setRound(null);
+        setLoadedRoundId(null);
+        setLiveLoadError(`Round #${target} is still syncing before commit. Retrying...`);
+        await refreshLiveWithRetry(target, { attempts: 2, delayMs: 900 }).catch(() => null);
+        await wait(1100);
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(displayError(lastError));
   }
 
   function liveProposalFromSubmission(submission: PilotSubmissionView): ProposalRecord {
@@ -1149,6 +1210,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       setMode("live");
       setRoundId(nextId);
       setRound(null);
+      setLoadedRoundId(null);
       setLiveProposals([]);
       setSelectedProposalId(null);
       const followingId = (BigInt(nextId) + 1n).toString();
@@ -1185,6 +1247,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     setTrustlessWorkReceipt(emptyReceipt());
     setTransactionHashes([]);
     setRound(null);
+    setLoadedRoundId(null);
     setLiveProposals([]);
     setLiveLoadError("");
     window.location.hash = "#/pilot/trustless-work";
@@ -1260,24 +1323,20 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   }
 
   async function submitLiveProposal() {
-    if (!contract || !address || !round || !liveRoundId) {
+    if (!contract || !address || !liveRoundId) {
       toast.push("error", "Live round required", "Connect a wallet and load or create a live round first.");
       return;
     }
     setBusy("submit-proposal");
     try {
-      if (round.status.tag !== "Open") {
-        throw new Error(
-          `This round is no longer accepting offers (current status: ${round.status.tag}). Create a fresh live round and submit before the deadline.`,
-        );
-      }
+      const currentRound = await requireLoadedOpenRound(liveRoundId);
       const details = buildProposalDetails(proposalDraft);
       const drand = quicknet();
       const sealed = await sealProposal({
-        round: Number(round.reveal_round),
+        round: Number(currentRound.reveal_round),
         drand,
         identity: new TextEncoder().encode(address),
-        auditorPublicKey: new Uint8Array(round.auditor_pubkey),
+        auditorPublicKey: new Uint8Array(currentRound.auditor_pubkey),
         price: BigInt(Math.round(details.totalAmount * 10_000_000)),
         proposal: {
           timelineDays: details.timelineDays,
@@ -1300,14 +1359,14 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           },
         },
       });
-      const sent = await signAndSendWithSequenceRetry(() => contract.commit_v2({
+      const sent = await sendCommitWithRoundRetry(liveRoundId, {
         round_id: BigInt(liveRoundId),
         bidder: address,
         commitment: Buffer.from(sealed.commitment),
         ciphertext: Buffer.from(sealed.ciphertext),
         escrow: 0n,
         auditor_blob: Buffer.from(sealed.auditorBlob),
-      }));
+      });
       const hash = txHashFromResult(sent);
       if (hash) rememberTransaction(hash);
       setRound((current) => (
@@ -1329,7 +1388,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         },
       ]);
       setRole("organizer");
-      await refreshLive(liveRoundId);
+      await refreshLiveWithRetry(liveRoundId).catch(() => null);
       toast.push("success", "Private proposal submitted", `Sealed on ReceiptOnly round #${liveRoundId}`);
     } catch (error) {
       toast.push("error", "Proposal submission failed", displayError(error));
@@ -1366,9 +1425,13 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       }
       const bidders = (await contract.get_bidders_v2({ round_id: rid })).result.unwrap();
       let revealedCount = 0;
+      let alreadyRevealedCount = 0;
       for (const bidder of bidders) {
         const state = (await contract.get_submission_v2({ round_id: rid, bidder })).result.unwrap();
-        if (state.revealed_envelope != null) continue;
+        if (state.revealed_envelope != null) {
+          alreadyRevealedCount += 1;
+          continue;
+        }
         const seal = (await contract.get_seal_v2({ round_id: rid, bidder })).result;
         if (!seal) throw new Error(`Encrypted offer is unavailable for ${shortAddr(bidder)}`);
         const envelope = await openPayload(new Uint8Array(seal.ciphertext), drand);
@@ -1382,10 +1445,15 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           revealedCount += 1;
         } catch (error) {
           if (!isSubmissionAlreadyRevealed(error)) throw error;
+          alreadyRevealedCount += 1;
         }
       }
-      await refreshLive();
-      toast.push("success", "Proposals revealed", `${revealedCount} on-chain submission(s) opened`);
+      await refreshLiveWithRetry(liveRoundId, { attempts: 10, delayMs: 1200 }).catch(() => null);
+      toast.push(
+        "success",
+        "Proposals revealed",
+        `${revealedCount} new, ${alreadyRevealedCount} already open, ${bidders.length} participant(s) total`,
+      );
     } catch (error) {
       toast.push("error", "Reveal failed", displayError(error));
     } finally {
@@ -1722,7 +1790,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           <div className="signal-provider-list">
             {mode === "live"
               ? (
-                  round?.bidders.length
+                  activeRoundReady && round?.bidders.length
                     ? round.bidders.map((bidder) => {
                         const proposal = liveBidderProposal(bidder);
                         return (
@@ -1869,8 +1937,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                   <RefreshCw size={18} />
                   <div>
                     <strong>{activeLiveRoundId ? `Live round #${activeLiveRoundId}` : "No live round selected"}</strong>
-                    <p>{round ? (liveLoadError || "Round data is ready for provider submission.") : (liveLoadError || "Load the live round before submitting a private proposal.")}</p>
-                    {!round && activeLiveRoundId && (
+                    <p>{liveProviderRoundMessage}</p>
+                    {!activeRoundReady && activeLiveRoundId && (
                       <button type="button" className="secondary-action compact" onClick={reloadActiveRound} disabled={busy !== null}>
                         <RefreshCw size={14} />
                         {busy === "load-round" ? "Loading..." : "Reload round"}
@@ -1879,13 +1947,15 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                   </div>
                 </div>
               )}
-              <button type="button" className="primary-action" onClick={mode === "live" ? submitLiveProposal : createSampleProposal} disabled={busy !== null || (mode === "live" && (!round || !liveRoundId || !liveSubmissionOpen))}>
+              <button type="button" className="primary-action" onClick={mode === "live" ? submitLiveProposal : createSampleProposal} disabled={busy !== null || (mode === "live" && (!activeRoundReady || !liveRoundId || !liveSubmissionOpen))}>
                 <LockKeyhole size={16} />
                 {mode === "live"
                   ? busy === "submit-proposal"
                     ? "Waiting for wallet..."
-                    : !round || !liveRoundId
+                    : !activeRoundReady || !liveRoundId
                       ? "Load live round first"
+                      : connectedWalletAlreadySubmitted
+                        ? "Update sealed proposal on-chain"
                       : liveSubmissionOpen
                         ? "Submit private proposal on-chain"
                         : "Round closed"
@@ -2070,7 +2140,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                     </div>
                   </div>
                   <button type="button" className={selectedProposalId === entry.id ? "secondary-action compact" : "primary-action compact"} onClick={() => selectProposal(entry.id)}>
-                    {selectedProposalId === entry.id ? "Selected proposal" : "Select proposal"}
+                    {selectedProposalId === entry.id ? "Winner selected" : "Select winner"}
                     <ArrowRight size={15} />
                   </button>
                 </article>
