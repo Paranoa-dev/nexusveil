@@ -382,7 +382,11 @@ function isRevealGateNotReadyError(error: unknown): boolean {
 
 function isRoundReadPendingError(error: unknown): boolean {
   const message = transactionErrorText(error);
-  return message.includes("not visible from the Stellar RPC yet") || isRoundNotFoundError(error);
+  return (
+    message.includes("not visible from the Stellar RPC yet") ||
+    message.includes("Revealed submissions are still syncing") ||
+    isRoundNotFoundError(error)
+  );
 }
 
 function wait(ms: number): Promise<void> {
@@ -885,6 +889,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const reader = useReadOnlyContract();
   const sdk = useReadOnlySdk();
   const refreshRequest = useRef(0);
+  const liveProposalCount = useRef(0);
   const escrowRecoveryRequest = useRef<string | null>(null);
   const selectionPanelRef = useRef<HTMLElement | null>(null);
   const handoffPanelRef = useRef<HTMLElement | null>(null);
@@ -907,6 +912,12 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const liveSubmissionOpen = mode !== "live" || Boolean(activeRoundReady && round && round.status.tag === "Open" && Number(round.commit_deadline) * 1000 > now);
   const liveBidderCount = activeRoundReady ? round?.bidders.length ?? 0 : 0;
   const participantCount = mode === "live" ? liveBidderCount : proposals.length;
+  const liveProposalDataPending = Boolean(
+    mode === "live" &&
+    revealed &&
+    participantCount > 0 &&
+    liveProposals.length < participantCount,
+  );
   const currentRoundInputIssue = mode === "live"
     ? roundInputIssue(roundInput, nextLiveRoundId)
     : null;
@@ -1258,6 +1269,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       );
       if (request !== refreshRequest.current) return null;
       const revealedEntries = revealed.filter((entry): entry is ProposalRecord => entry !== null);
+      liveProposalCount.current = revealedEntries.length;
       setLiveProposals(revealedEntries);
       setProposals((current) => (
         current.some((entry) => entry.source === "live")
@@ -1269,6 +1281,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       if (request === refreshRequest.current) {
         setLiveLoadError(displayError(error) || `Round #${target} could not be loaded.`);
         if (target === liveRoundId) {
+          liveProposalCount.current = 0;
           setRound(null);
           setLoadedRoundId(null);
           setLiveProposals([]);
@@ -1280,7 +1293,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
 
   async function refreshLiveWithRetry(
     target = liveRoundId,
-    options: { attempts?: number; delayMs?: number } = {},
+    options: { attempts?: number; delayMs?: number; waitForReveals?: boolean } = {},
   ): Promise<RoundV2 | null> {
     if (!target) return null;
     const attempts = options.attempts ?? 8;
@@ -1288,7 +1301,16 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     let lastError: unknown;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        return await refreshLive(target);
+        const nextRound = await refreshLive(target);
+        if (
+          options.waitForReveals &&
+          nextRound &&
+          nextRound.bidders.length > 0 &&
+          liveProposalCount.current < nextRound.bidders.length
+        ) {
+          throw new Error("Revealed submissions are still syncing from Stellar RPC.");
+        }
+        return nextRound;
       } catch (error) {
         lastError = error;
         if (!isRoundReadPendingError(error) || attempt === attempts - 1) throw error;
@@ -1698,7 +1720,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           alreadyRevealedCount += 1;
         }
       }
-      void refreshLiveWithRetry(liveRoundId, { attempts: 10, delayMs: 1200 }).catch(() => null);
+      void refreshLiveWithRetry(liveRoundId, { attempts: 10, delayMs: 1200, waitForReveals: true }).catch((error) => {
+        setLiveLoadError(displayError(error));
+      });
       toast.push(
         "success",
         "Proposals revealed",
@@ -2466,7 +2490,13 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
               <strong>{selectedProposal ? "Winner selected" : "Select winner"}</strong>
             </div>
             <div className="signal-offer-grid">
-              {proposalList().filter((entry) => entry.revealed).map((entry) => (
+              {liveProposalDataPending ? (
+                <div className="pilot-empty trustless-work-reveal-sync" role="status">
+                  <RefreshCw size={18} />
+                  <strong>Revealed proposals are syncing...</strong>
+                  <span>The proposals are open on-chain. This page will show the selection cards automatically in a few seconds.</span>
+                </div>
+              ) : proposalList().filter((entry) => entry.revealed).map((entry) => (
                 <article className={`signal-offer ${selectedProposalId === entry.id ? "selected" : ""}`} key={entry.id}>
                   <div className="signal-offer-heading">
                     <div>
