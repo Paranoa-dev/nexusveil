@@ -23,6 +23,7 @@ export interface TrustlessWorkTrustlineConfig {
   contractId?: string;
   symbol?: string;
   address?: string;
+  decimals?: number;
 }
 
 export interface TrustlessWorkMilestoneInput {
@@ -408,16 +409,28 @@ function detailsMessage(value: TrustlessWorkErrorDetails["message"]): string {
   return typeof value === "string" ? value : "";
 }
 
+function validationDetailsMessage(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  return Object.entries(value as Record<string, unknown>)
+    .map(([field, messages]) => {
+      const text = Array.isArray(messages) ? messages.filter(Boolean).join(", ") : String(messages);
+      return text ? `${field}: ${text}` : "";
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
 async function parseError(response: Response): Promise<TrustlessWorkApiError> {
   let details: TrustlessWorkErrorDetails = { status: response.status };
   try {
     const parsed = (await response.clone().json()) as Partial<TrustlessWorkErrorDetails>;
     const message = detailsMessage(parsed.message);
+    const validationDetails = validationDetailsMessage((parsed as Record<string, unknown>).details);
     details = {
       ...details,
       ...parsed,
       status: response.status,
-      ...(message && !parsed.detail ? { detail: message } : {}),
+      ...((message || validationDetails) && !parsed.detail ? { detail: [message, validationDetails].filter(Boolean).join("; ") } : {}),
       ...(parsed.error && !parsed.title ? { title: parsed.error } : {}),
     };
   } catch {
@@ -636,15 +649,18 @@ function firstRole(values: string[], label: string): string {
 
 function validateTrustlessWorkTrustlineV1(
   trustline: TrustlessWorkTrustlineConfig,
-): Required<Pick<TrustlessWorkTrustlineConfig, "symbol" | "address">> {
-  const symbol = trustline.symbol?.trim();
-  const address = trustline.address?.trim();
-  if (!symbol || !address) {
-    throw new Error("Trustless Work v1 requires trustline symbol + issuer address.");
+): { address: string; decimals: number } {
+  const address = trustline.contractId?.trim() || trustline.address?.trim();
+  if (!address || !StrKey.isValidContract(address)) {
+    throw new Error("Trustless Work v1 requires the USDC trustline contract address (C...).");
+  }
+  const decimals = trustline.decimals ?? 10_000_000;
+  if (!Number.isInteger(decimals) || decimals <= 0) {
+    throw new Error("Trustless Work v1 trustline decimals must be a positive integer.");
   }
   return {
-    symbol,
-    address: stellarKey(address, "trustline.address"),
+    address,
+    decimals,
   };
 }
 
@@ -728,7 +744,6 @@ export async function fundMultiReleaseEscrow(
 export async function sendSignedTransaction(
   config: TrustlessWorkConfig,
   signedXdr: string,
-  options: { returnEscrowDataIsRequired?: boolean } = {},
 ): Promise<TrustlessWorkSendTransactionResponse> {
   if (!signedXdr.trim()) throw new Error("signedXdr must not be empty");
   const response = await trustlessWorkRequest<TrustlessWorkSendTransactionResponse & { hash?: string }>(
@@ -736,12 +751,7 @@ export async function sendSignedTransaction(
     config.apiVersion === "v1" ? "/helper/send-transaction" : "/stellar/send-transaction",
     {
       method: "POST",
-      body: {
-        signedXdr,
-        ...(config.apiVersion === "v1" && options.returnEscrowDataIsRequired
-          ? { returnEscrowDataIsRequired: true }
-          : {}),
-      },
+      body: { signedXdr },
     },
   );
   return normalizeSendTransactionResponse(response);

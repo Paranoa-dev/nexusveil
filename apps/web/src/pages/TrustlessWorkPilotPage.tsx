@@ -292,10 +292,8 @@ function resolveTrustlessWorkTrustline(
   const address = draft.trustlineAddress.trim();
   if (apiVersion === "v1") {
     return {
-      symbol,
-      address: address && StrKey.isValidEd25519PublicKey(address)
-        ? address
-        : TRUSTLESS_WORK_TESTNET_USDC_ISSUER,
+      contractId: resolveTrustlessWorkContractId(draft.trustlineContractId),
+      decimals: 10_000_000,
     };
   }
 
@@ -724,11 +722,10 @@ function isRetryableNetworkSendError(error: unknown): boolean {
 async function sendTrustlessWorkTransaction(
   config: NonNullable<ReturnType<typeof resolveTrustlessWorkConfig>>,
   signedXdr: string,
-  options: { returnEscrowDataIsRequired?: boolean } = {},
 ): Promise<TrustlessWorkSendTransactionResponse> {
   const localTxHash = hashSignedTransaction(signedXdr, NETWORK);
   try {
-    const response = await sendSignedTransaction(config, signedXdr, options);
+    const response = await sendSignedTransaction(config, signedXdr);
     const txHash = response.txHash ?? localTxHash;
     return { ...response, txHash };
   } catch (error) {
@@ -1815,9 +1812,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       });
       const signedError = freighterError(signed);
       if (signedError) throw new Error(signedError);
-      const submit = await sendTrustlessWorkTransaction(twConfig, signed.signedTxXdr, {
-        returnEscrowDataIsRequired: true,
-      });
+      const submit = await sendTrustlessWorkTransaction(twConfig, signed.signedTxXdr);
       const deploymentTxHash = submit.txHash ?? build.txHash ?? null;
       let escrowContractId = submit.contractId
         ?? readContractId(submit.escrow)
@@ -2537,20 +2532,33 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                     </label>
                     <div className="signal-form-grid">
                       {!isTrustlessWorkV1 && (
+                        <>
+                          <label>
+                            Trustline contract ID
+                            <input placeholder="Canonical testnet USDC contract" value={trustlessWorkDraft.trustlineContractId} onChange={(event) => updateTrustlessWorkRole("trustlineContractId", event.target.value)} />
+                          </label>
+                          <label>
+                            Trustline symbol
+                            <input placeholder="USDC" value={trustlessWorkDraft.trustlineSymbol} onChange={(event) => updateTrustlessWorkRole("trustlineSymbol", event.target.value)} />
+                          </label>
+                        </>
+                      )}
+                      {isTrustlessWorkV1 && (
                         <label>
-                          Trustline contract ID
-                          <input placeholder="Canonical testnet USDC contract" value={trustlessWorkDraft.trustlineContractId} onChange={(event) => updateTrustlessWorkRole("trustlineContractId", event.target.value)} />
+                          Trustline contract address
+                          <input placeholder="C... USDC contract" value={trustlessWorkDraft.trustlineContractId} onChange={(event) => updateTrustlessWorkRole("trustlineContractId", event.target.value)} />
                         </label>
                       )}
-                      <label>
-                        Trustline symbol
-                        <input placeholder="USDC" value={trustlessWorkDraft.trustlineSymbol} onChange={(event) => updateTrustlessWorkRole("trustlineSymbol", event.target.value)} />
-                      </label>
                     </div>
                     <div className="signal-form-grid">
                       <label>
-                        {isTrustlessWorkV1 ? "Trustline issuer address" : "Trustline address"}
-                        <input placeholder={isTrustlessWorkV1 ? "USDC issuer G..." : "G... issuer or asset address"} value={trustlessWorkDraft.trustlineAddress} onChange={(event) => updateTrustlessWorkRole("trustlineAddress", event.target.value)} />
+                        {isTrustlessWorkV1 ? "USDC decimals" : "Trustline address"}
+                        <input
+                          placeholder={isTrustlessWorkV1 ? "10000000" : "G... issuer or C... asset address"}
+                          value={isTrustlessWorkV1 ? "10000000" : trustlessWorkDraft.trustlineAddress}
+                          onChange={isTrustlessWorkV1 ? undefined : (event) => updateTrustlessWorkRole("trustlineAddress", event.target.value)}
+                          readOnly={isTrustlessWorkV1}
+                        />
                       </label>
                       <label>
                         Receiver memo
@@ -2559,7 +2567,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                     </div>
                     <p className="signal-helper trustless-work-trustline-note">
                       {isTrustlessWorkV1
-                        ? "USDC issuer is only the token identifier. The provider and every milestone receiver must be real funded Testnet wallets with their own USDC trustline."
+                        ? "v1 Testnet uses the USDC contract address plus 7 decimals. The provider and every milestone receiver still need a real funded Testnet wallet with a USDC trustline."
                         : "The contract ID is prefilled with the canonical testnet USDC contract. Leave it alone unless you are testing a custom asset with a valid C... contract address."}
                     </p>
                   </div>
