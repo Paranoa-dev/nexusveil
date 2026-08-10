@@ -276,6 +276,7 @@ function isRoundNotFoundError(error: unknown): boolean {
   const message = displayError(error);
   return (
     message.includes("RoundNotFound") ||
+    message.includes("Error(Contract, #3)") ||
     message.includes("ContractError(3)") ||
     message.includes("Contract, #3")
   );
@@ -842,14 +843,6 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     try {
       const v2 = await reader.get_round_v2({ round_id: target });
       v2.result.unwrap();
-      return true;
-    } catch (error) {
-      if (!isRoundNotFoundError(error)) throw error;
-    }
-
-    try {
-      const legacy = await reader.get_round({ round_id: target });
-      legacy.result.unwrap();
       return true;
     } catch (error) {
       if (!isRoundNotFoundError(error)) throw error;
