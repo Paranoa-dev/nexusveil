@@ -30,6 +30,7 @@ export {
   type SealedProposalRoundParams,
   type SealAssetBidParams,
   type SealedProposal,
+  type SealedProposalMilestone,
   type SealProposalParams,
 } from "./templates.js";
 export {

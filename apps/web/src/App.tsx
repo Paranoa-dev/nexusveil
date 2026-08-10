@@ -10,6 +10,7 @@ import { DocsPage } from "./pages/DocsPage";
 import { LandingPage } from "./pages/LandingPage";
 import { PilotPage } from "./pages/PilotPage";
 import { SignalPilotPage } from "./pages/SignalPilotPage";
+import { TrustlessWorkPilotPage } from "./pages/TrustlessWorkPilotPage";
 import { ToastProvider } from "./ui/Toast";
 
 export default function App() {
@@ -41,6 +42,8 @@ export default function App() {
         <PilotPage goHome={() => navigate("landing")} />
       ) : route.page === "signalPilot" ? (
         <SignalPilotPage goHome={() => navigate("landing")} />
+      ) : route.page === "trustlessWorkPilot" ? (
+        <TrustlessWorkPilotPage goHome={() => navigate("landing")} />
       ) : route.page === "docs" ? (
         <DocsPage goHome={() => navigate("landing")} />
       ) : (

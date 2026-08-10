@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { Buffer } from "buffer";
+import { StrKey } from "@stellar/stellar-sdk";
 
 import { encodeSealedProposal } from "@sub-rosa/sdk";
 import { encodePayloadEnvelope } from "@sub-rosa/tlock";
@@ -27,6 +29,73 @@ test("decodes a revealed proposal into a partner-readable view", () => {
       valid: true,
     },
   );
+});
+
+test("decodes milestone proposal fields for the Trustless Work handoff", () => {
+  const receiver = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
+  const bytes = encodePayloadEnvelope({
+    amount: 15_000_000_000n,
+    nonce: new Uint8Array(32).fill(8),
+    payload: encodeSealedProposal({
+      timelineDays: 21,
+      approach: "Build, integrate, and review",
+      totalAmount: 1500,
+      currency: "USDC",
+      deliverables: ["Dashboard UX", "Stellar data sync"],
+      milestones: [
+        {
+          title: "Dashboard",
+          description: "Merchant analytics UI",
+          amount: 600,
+          receiver,
+          delivery: "2026-09-01",
+        },
+        {
+          title: "Integration",
+          description: "Ledger data sync",
+          amount: 900,
+          receiver,
+          delivery: "2026-09-10",
+        },
+      ],
+      metadata: {
+        provider: "Northstar Studio",
+        team: "4 engineers",
+      },
+    }),
+  });
+
+  assert.deepEqual(decodePilotSubmission(receiver, "ReceiptOnly", bytes, true), {
+    bidder: receiver,
+    amount: "15000000000",
+    timelineDays: 21,
+    approach: "Build, integrate, and review",
+    totalAmount: 1500,
+    currency: "USDC",
+    deliverables: ["Dashboard UX", "Stellar data sync"],
+    milestones: [
+      {
+        title: "Dashboard",
+        description: "Merchant analytics UI",
+        amount: 600,
+        receiver,
+        delivery: "2026-09-01",
+      },
+      {
+        title: "Integration",
+        description: "Ledger data sync",
+        amount: 900,
+        receiver,
+        delivery: "2026-09-10",
+      },
+    ],
+    metadata: {
+      provider: "Northstar Studio",
+      team: "4 engineers",
+    },
+    payload: null,
+    valid: true,
+  });
 });
 
 test("decodes a revealed auction amount and optional payload", () => {

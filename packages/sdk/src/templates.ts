@@ -4,6 +4,7 @@ import type {
   SealPayloadParams,
   SealedPayload,
 } from "@sub-rosa/tlock";
+import { StrKey } from "@stellar/stellar-sdk";
 
 import type {
   CreatePartnerRoundV2Params,
@@ -122,6 +123,23 @@ export function sealAssetBid(params: SealAssetBidParams): Promise<SealedPayload>
 export interface SealedProposal {
   timelineDays: number;
   approach: string;
+  /** Optional human-token proposal total. ReceiptOnly mode does not escrow it. */
+  totalAmount?: number;
+  /** Optional display / integration currency, e.g. USDC. */
+  currency?: string;
+  deliverables?: string[];
+  milestones?: SealedProposalMilestone[];
+  metadata?: Record<string, string>;
+}
+
+export interface SealedProposalMilestone {
+  title: string;
+  description?: string;
+  amount: number;
+  /** Stellar account that should receive this milestone, when an integration needs it. */
+  receiver?: string;
+  /** Expected delivery date or duration, kept partner-defined. */
+  delivery?: string;
   metadata?: Record<string, string>;
 }
 
@@ -142,6 +160,94 @@ function canonicalMetadata(
   );
 }
 
+function safeAmountUnits(value: number, label: string): bigint {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be a positive number`);
+  }
+  const units = Math.round(value * 10_000_000);
+  if (!Number.isSafeInteger(units)) {
+    throw new Error(`${label} is outside the safe amount range`);
+  }
+  return BigInt(units);
+}
+
+function validateMetadata(
+  metadata: Record<string, string> | undefined,
+  label: string,
+): void {
+  if (
+    metadata &&
+    Object.values(metadata).some((entry) => typeof entry !== "string")
+  ) {
+    throw new Error(`${label} metadata values must be strings`);
+  }
+}
+
+function normalizeDeliverables(deliverables: string[] | undefined): string[] | undefined {
+  if (deliverables === undefined) return undefined;
+  if (
+    !Array.isArray(deliverables) ||
+    deliverables.length > 20 ||
+    deliverables.some((entry) => typeof entry !== "string" || !entry.trim())
+  ) {
+    throw new Error("deliverables must be a non-empty string array with at most 20 entries");
+  }
+  return deliverables.map((entry) => entry.trim());
+}
+
+function normalizeMilestones(
+  milestones: SealedProposalMilestone[] | undefined,
+  totalAmount: number | undefined,
+): SealedProposalMilestone[] | undefined {
+  if (milestones === undefined) return undefined;
+  if (!Array.isArray(milestones) || milestones.length < 1 || milestones.length > 10) {
+    throw new Error("milestones must contain between 1 and 10 entries");
+  }
+  if (totalAmount === undefined) {
+    throw new Error("totalAmount is required when milestones are provided");
+  }
+
+  const totalUnits = safeAmountUnits(totalAmount, "totalAmount");
+  let milestoneUnits = 0n;
+  const normalized = milestones.map((milestone, index) => {
+    if (!milestone || typeof milestone !== "object") {
+      throw new Error(`milestone ${index + 1} must be an object`);
+    }
+    if (typeof milestone.title !== "string" || !milestone.title.trim()) {
+      throw new Error(`milestone ${index + 1} title must not be empty`);
+    }
+    if (
+      milestone.description !== undefined &&
+      typeof milestone.description !== "string"
+    ) {
+      throw new Error(`milestone ${index + 1} description must be a string`);
+    }
+    if (milestone.receiver !== undefined && !StrKey.isValidEd25519PublicKey(milestone.receiver)) {
+      throw new Error(`milestone ${index + 1} receiver must be a valid Stellar public key`);
+    }
+    if (milestone.delivery !== undefined && typeof milestone.delivery !== "string") {
+      throw new Error(`milestone ${index + 1} delivery must be a string`);
+    }
+    validateMetadata(milestone.metadata, `milestone ${index + 1}`);
+    milestoneUnits += safeAmountUnits(milestone.amount, `milestone ${index + 1} amount`);
+    return {
+      title: milestone.title.trim(),
+      ...(milestone.description === undefined ? {} : { description: milestone.description.trim() }),
+      amount: milestone.amount,
+      ...(milestone.receiver === undefined ? {} : { receiver: milestone.receiver }),
+      ...(milestone.delivery === undefined ? {} : { delivery: milestone.delivery.trim() }),
+      ...(milestone.metadata === undefined
+        ? {}
+        : { metadata: canonicalMetadata(milestone.metadata) }),
+    };
+  });
+
+  if (milestoneUnits !== totalUnits) {
+    throw new Error("sum(milestone amounts) must equal totalAmount");
+  }
+  return normalized;
+}
+
 export function encodeSealedProposal(proposal: SealedProposal): Uint8Array {
   if (!Number.isSafeInteger(proposal.timelineDays) || proposal.timelineDays < 1) {
     throw new Error("timelineDays must be a positive safe integer");
@@ -149,16 +255,23 @@ export function encodeSealedProposal(proposal: SealedProposal): Uint8Array {
   if (!proposal.approach.trim()) {
     throw new Error("approach must not be empty");
   }
-  if (
-    proposal.metadata &&
-    Object.values(proposal.metadata).some((entry) => typeof entry !== "string")
-  ) {
-    throw new Error("metadata values must be strings");
+  if (proposal.totalAmount !== undefined) {
+    safeAmountUnits(proposal.totalAmount, "totalAmount");
   }
+  if (proposal.currency !== undefined && !proposal.currency.trim()) {
+    throw new Error("currency must not be empty");
+  }
+  validateMetadata(proposal.metadata, "proposal");
+  const deliverables = normalizeDeliverables(proposal.deliverables);
+  const milestones = normalizeMilestones(proposal.milestones, proposal.totalAmount);
   const value = {
     version: 1,
     timelineDays: proposal.timelineDays,
     approach: proposal.approach,
+    ...(proposal.totalAmount === undefined ? {} : { totalAmount: proposal.totalAmount }),
+    ...(proposal.currency === undefined ? {} : { currency: proposal.currency.trim() }),
+    ...(deliverables === undefined ? {} : { deliverables }),
+    ...(milestones === undefined ? {} : { milestones }),
     ...(proposal.metadata
       ? { metadata: canonicalMetadata(proposal.metadata) }
       : {}),
@@ -180,6 +293,31 @@ export function decodeSealedProposal(payload: Uint8Array): SealedProposal {
     throw new Error("proposal approach is invalid");
   }
   if (
+    value.totalAmount !== undefined &&
+    (typeof value.totalAmount !== "number" || !Number.isFinite(value.totalAmount))
+  ) {
+    throw new Error("proposal totalAmount is invalid");
+  }
+  if (
+    value.currency !== undefined &&
+    (typeof value.currency !== "string" || !value.currency.trim())
+  ) {
+    throw new Error("proposal currency is invalid");
+  }
+  if (
+    value.deliverables !== undefined &&
+    (!Array.isArray(value.deliverables) ||
+      value.deliverables.some((entry) => typeof entry !== "string" || !entry.trim()))
+  ) {
+    throw new Error("proposal deliverables are invalid");
+  }
+  if (
+    value.milestones !== undefined &&
+    !Array.isArray(value.milestones)
+  ) {
+    throw new Error("proposal milestones are invalid");
+  }
+  if (
     value.metadata !== undefined &&
     (!value.metadata ||
       typeof value.metadata !== "object" ||
@@ -191,6 +329,21 @@ export function decodeSealedProposal(payload: Uint8Array): SealedProposal {
   return {
     timelineDays: Number(value.timelineDays),
     approach: value.approach,
+    ...(value.totalAmount === undefined
+      ? {}
+      : { totalAmount: Number(value.totalAmount) }),
+    ...(value.currency === undefined ? {} : { currency: value.currency }),
+    ...(value.deliverables === undefined
+      ? {}
+      : { deliverables: value.deliverables as string[] }),
+    ...(value.milestones === undefined
+      ? {}
+      : {
+          milestones: normalizeMilestones(
+            value.milestones as SealedProposalMilestone[],
+            Number(value.totalAmount),
+          ),
+        }),
     ...(value.metadata === undefined
       ? {}
       : { metadata: value.metadata as Record<string, string> }),

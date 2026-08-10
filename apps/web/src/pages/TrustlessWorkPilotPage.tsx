@@ -1,0 +1,1820 @@
+import { Buffer } from "buffer";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  getNetworkDetails,
+  isConnected,
+  requestAccess,
+  signTransaction,
+} from "@stellar/freighter-api";
+import { StrKey } from "@stellar/stellar-sdk";
+import {
+  SEALED_PROPOSAL_SCHEMA_REF,
+  serializeReceiptV2,
+  sealProposal,
+  type RoundV2,
+  verifyReceiptV2,
+} from "@sub-rosa/sdk";
+import {
+  encodePayloadEnvelope,
+  fetchRoundSignature,
+  generateAuditorKeypair,
+  openPayload,
+  quicknet,
+  roundInSeconds,
+} from "@sub-rosa/tlock";
+import {
+  ArrowRight,
+  CheckCircle2,
+  FileCheck2,
+  LockKeyhole,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  Upload,
+  WalletCards,
+  X,
+} from "lucide-react";
+
+import {
+  CONTRACT_ID,
+  LOGO_SRC,
+  NETWORK,
+  NETWORK_LABEL,
+  STELLAR_NETWORK,
+  displayError,
+  freighterError,
+  resolveFreighterAddress,
+  sha256Bytes,
+  stellarExpertTxLink,
+  useReadOnlyContract,
+  useReadOnlySdk,
+  useWalletContract,
+} from "../lib/chain";
+import { useDrandCountdown } from "../hooks/useDrandCountdown";
+import { isRevealAlreadyOpen, isSubmissionAlreadyRevealed } from "../lib/pilotConcurrency";
+import { decodePilotSubmission, type PilotSubmissionView } from "../lib/pilotSubmission";
+import { shortAddr, shortHash, usdc } from "../lib/format";
+import { useToast } from "../ui/Toast";
+import {
+  buildMultiReleaseEscrow,
+  fundMultiReleaseEscrow,
+  getEscrowByContractId,
+  readContractId,
+  resolveTrustlessWorkConfig,
+  sendSignedTransaction,
+  trustlessWorkConfigIssues,
+  validateTrustlessWorkDeployPayload,
+  type TrustlessWorkConfig,
+  type TrustlessWorkDeployMultiReleasePayload,
+  type TrustlessWorkEscrowSnapshot,
+  type TrustlessWorkMilestoneInput,
+  type TrustlessWorkRoleConfig,
+  type TrustlessWorkSendTransactionResponse,
+  type TrustlessWorkUnsignedTransactionResponse,
+} from "../integrations/trustless-work";
+import { trustlessWorkPilotRoundIdFromHash } from "../config/routing";
+
+type PilotMode = "sample" | "live";
+type PilotRole = "organizer" | "provider";
+type PilotStatus = "collecting" | "ready" | "revealed" | "selected";
+type DeadlinePreset = "2m" | "5m" | "1d";
+
+const STORAGE_KEY = "subrosa-trustless-work-pilot-v1";
+const DEADLINE_OPTIONS: Array<{ value: DeadlinePreset; label: string; seconds: number }> = [
+  { value: "2m", label: "2 min", seconds: 2 * 60 },
+  { value: "5m", label: "5 min", seconds: 5 * 60 },
+  { value: "1d", label: "1 day", seconds: 24 * 60 * 60 },
+];
+
+interface ProjectDraft {
+  title: string;
+  description: string;
+  budget: string;
+  deadlinePreset: DeadlinePreset;
+}
+
+interface ProposalMilestoneDraft {
+  title: string;
+  description: string;
+  amount: string;
+  receiver: string;
+  delivery: string;
+}
+
+interface ProposalDraft {
+  providerName: string;
+  providerMeta: string;
+  providerWallet: string;
+  totalAmount: string;
+  timelineDays: string;
+  approach: string;
+  team: string;
+  deliverables: string;
+  milestones: ProposalMilestoneDraft[];
+}
+
+interface ProposalDetails {
+  totalAmount: number;
+  timelineDays: number;
+  approach: string;
+  team: string;
+  deliverables: string[];
+  milestones: Array<{
+    title: string;
+    description: string;
+    amount: number;
+    receiver: string;
+    delivery: string;
+  }>;
+}
+
+interface ProposalRecord {
+  id: string;
+  provider: string;
+  providerMeta: string;
+  wallet: string;
+  submittedAt: number;
+  revealed: boolean;
+  source: "sample" | "live" | "demo";
+  data: ProposalDetails;
+}
+
+interface TrustlessWorkDraft {
+  platformFee: string;
+  approver: string;
+  serviceProvider: string;
+  platform: string;
+  releaseSigner: string;
+  disputeResolver: string;
+  admin: string;
+  observers: string;
+  trustlineContractId: string;
+  trustlineSymbol: string;
+  trustlineAddress: string;
+  receiverMemo: string;
+}
+
+interface TrustlessWorkReceipt {
+  deployBuild?: TrustlessWorkUnsignedTransactionResponse | null;
+  deploySubmit?: TrustlessWorkSendTransactionResponse | null;
+  fundBuild?: TrustlessWorkUnsignedTransactionResponse | null;
+  fundSubmit?: TrustlessWorkSendTransactionResponse | null;
+  escrowContractId?: string | null;
+  escrow?: TrustlessWorkEscrowSnapshot | null;
+  refreshedAt?: number | null;
+}
+
+interface PersistedState {
+  project: ProjectDraft;
+  mode: PilotMode;
+  role: PilotRole;
+  deadlineAt: number;
+  roundId: string | null;
+  roundInput: string;
+  selectedProposalId: string | null;
+  proposals: ProposalRecord[];
+  proposalDraft: ProposalDraft;
+  trustlessWorkDraft: TrustlessWorkDraft;
+  trustlessWorkReceipt: TrustlessWorkReceipt | null;
+  transactionHashes: string[];
+}
+
+function deadlineSeconds(value: DeadlinePreset): number {
+  return DEADLINE_OPTIONS.find((entry) => entry.value === value)?.seconds ?? 5 * 60;
+}
+
+function deadlineLabel(value: DeadlinePreset): string {
+  return DEADLINE_OPTIONS.find((entry) => entry.value === value)?.label ?? "5 min";
+}
+
+function sampleWallet(seed: number): string {
+  return StrKey.encodeEd25519PublicKey(Buffer.from(new Uint8Array(32).fill(seed)));
+}
+
+function nowMs(): number {
+  return Date.now();
+}
+
+function makeMilestone(seed: number, title: string, amount: number, receiver: string, delivery: string): ProposalMilestoneDraft {
+  return {
+    title,
+    description: title,
+    amount: amount.toString(),
+    receiver,
+    delivery,
+  };
+}
+
+function defaultProject(): ProjectDraft {
+  return {
+    title: "Build a Stellar merchant analytics dashboard",
+    description:
+      "Private selection workflow for a small analytics build with a visible reveal, then a Trustless Work multi-release escrow.",
+    budget: "2000",
+    deadlinePreset: "5m",
+  };
+}
+
+function defaultProposalDraft(): ProposalDraft {
+  return {
+    providerName: "Northstar Studio",
+    providerMeta: "Product engineering",
+    providerWallet: sampleWallet(30),
+    totalAmount: "1500",
+    timelineDays: "21",
+    approach: "Discovery, dashboard delivery, and security handoff.",
+    team: "4 engineers + 1 auditor",
+    deliverables: "Dashboard UX\nStellar data integration\nSecurity review",
+    milestones: [
+      makeMilestone(1, "UI / dashboard implementation", 400, sampleWallet(31), "2026-09-01"),
+      makeMilestone(2, "Stellar data integration", 700, sampleWallet(31), "2026-09-10"),
+      makeMilestone(3, "Security / final review", 400, sampleWallet(32), "2026-09-15"),
+    ],
+  };
+}
+
+function defaultTrustlessWorkDraft(selectedWallet = sampleWallet(31)): TrustlessWorkDraft {
+  return {
+    platformFee: "2",
+    approver: sampleWallet(40),
+    serviceProvider: selectedWallet,
+    platform: sampleWallet(41),
+    releaseSigner: sampleWallet(42),
+    disputeResolver: sampleWallet(43),
+    admin: sampleWallet(44),
+    observers: "",
+    trustlineContractId: import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_CONTRACT_ID?.trim() ?? "",
+    trustlineSymbol: import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_SYMBOL?.trim() || "USDC",
+    trustlineAddress: import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS?.trim() ?? "",
+    receiverMemo: "",
+  };
+}
+
+function seedSampleProposals(timestamp = nowMs()): ProposalRecord[] {
+  const samples: Array<[string, string, string, ProposalDetails]> = [
+    [
+      "provider-a",
+      "Northstar Studio",
+      "Product engineering",
+      {
+        totalAmount: 1500,
+        timelineDays: 21,
+        approach: "Phased delivery with a final security checkpoint.",
+        team: "4 engineers + 1 auditor",
+        deliverables: ["Dashboard UX", "Stellar data sync", "Security review"],
+        milestones: [
+          {
+            title: "UI / dashboard implementation",
+            description: "Frontend screens, filters, and export flow.",
+            amount: 400,
+            receiver: sampleWallet(31),
+            delivery: "2026-09-01",
+          },
+          {
+            title: "Stellar data integration",
+            description: "Metrics pipeline and ingest connectors.",
+            amount: 700,
+            receiver: sampleWallet(31),
+            delivery: "2026-09-10",
+          },
+          {
+            title: "Security / final review",
+            description: "Threat review and release signoff.",
+            amount: 400,
+            receiver: sampleWallet(32),
+            delivery: "2026-09-15",
+          },
+        ],
+      },
+    ],
+    [
+      "provider-b",
+      "Cedar Systems",
+      "Data delivery",
+      {
+        totalAmount: 1700,
+        timelineDays: 24,
+        approach: "Longer integration window with extra QA.",
+        team: "3 engineers + 1 designer",
+        deliverables: ["Analytics widgets", "Export jobs", "Role-based access"],
+        milestones: [
+          {
+            title: "Data model and ingestion",
+            description: "Schema, sync jobs, and staging metrics.",
+            amount: 600,
+            receiver: sampleWallet(33),
+            delivery: "2026-09-06",
+          },
+          {
+            title: "UX and reporting",
+            description: "Operator views and saved reports.",
+            amount: 700,
+            receiver: sampleWallet(33),
+            delivery: "2026-09-13",
+          },
+          {
+            title: "Launch hardening",
+            description: "QA and release notes.",
+            amount: 400,
+            receiver: sampleWallet(34),
+            delivery: "2026-09-18",
+          },
+        ],
+      },
+    ],
+    [
+      "provider-c",
+      "Harbor Labs",
+      "Implementation",
+      {
+        totalAmount: 1400,
+        timelineDays: 18,
+        approach: "Lean build with a tight milestone cadence.",
+        team: "2 engineers + 1 auditor",
+        deliverables: ["Admin dashboard", "Stellar ledger views", "Final review"],
+        milestones: [
+          {
+            title: "Admin dashboard",
+            description: "Project, proposal, and escrow views.",
+            amount: 500,
+            receiver: sampleWallet(35),
+            delivery: "2026-09-03",
+          },
+          {
+            title: "Ledger integration",
+            description: "Stellar activity and proof screens.",
+            amount: 500,
+            receiver: sampleWallet(35),
+            delivery: "2026-09-09",
+          },
+          {
+            title: "Final review",
+            description: "Security review and documentation.",
+            amount: 400,
+            receiver: sampleWallet(36),
+            delivery: "2026-09-14",
+          },
+        ],
+      },
+    ],
+  ];
+
+  return samples.map(([id, provider, providerMeta, data], index) => ({
+    id,
+    provider,
+    providerMeta,
+    wallet: data.milestones[0]?.receiver ?? sampleWallet(50 + index),
+    submittedAt: timestamp + index * 1000,
+    revealed: false,
+    source: "sample",
+    data,
+  }));
+}
+
+function loadPersistedState(): Partial<PersistedState> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Partial<PersistedState>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePersistedState(state: PersistedState): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function parseIntOrZero(value: string): number {
+  const normalized = value.trim().replace(/,/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseDeliverables(value: string): string[] {
+  return value
+    .split(/\n+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function parseMilestones(draft: ProposalDraft): ProposalDetails["milestones"] {
+  const milestones = draft.milestones.map((milestone, index) => {
+    const amount = parseIntOrZero(milestone.amount);
+    if (!milestone.title.trim()) {
+      throw new Error(`Milestone ${index + 1} title is required`);
+    }
+    if (!milestone.description.trim()) {
+      throw new Error(`Milestone ${index + 1} description is required`);
+    }
+    if (amount <= 0) {
+      throw new Error(`Milestone ${index + 1} amount must be positive`);
+    }
+    if (!StrKey.isValidEd25519PublicKey(milestone.receiver.trim())) {
+      throw new Error(`Milestone ${index + 1} receiver must be a valid Stellar public key`);
+    }
+    if (!milestone.delivery.trim()) {
+      throw new Error(`Milestone ${index + 1} delivery date is required`);
+    }
+    return {
+      title: milestone.title.trim(),
+      description: milestone.description.trim(),
+      amount,
+      receiver: milestone.receiver.trim(),
+      delivery: milestone.delivery.trim(),
+    };
+  });
+  if (milestones.length < 1 || milestones.length > 10) {
+    throw new Error("Milestone count must be between 1 and 10");
+  }
+  return milestones;
+}
+
+function buildProposalDetails(draft: ProposalDraft): ProposalDetails {
+  const totalAmount = parseIntOrZero(draft.totalAmount);
+  if (totalAmount <= 0) throw new Error("Total amount must be positive");
+  const timelineDays = parseIntOrZero(draft.timelineDays);
+  if (timelineDays <= 0) throw new Error("Timeline must be a positive whole number");
+  const deliverables = parseDeliverables(draft.deliverables);
+  if (deliverables.length < 1) throw new Error("At least one deliverable is required");
+  const milestones = parseMilestones(draft);
+  const milestoneTotal = milestones.reduce((sum, milestone) => sum + milestone.amount, 0);
+  if (milestoneTotal !== totalAmount) {
+    throw new Error("Milestone amounts must add up to the total amount");
+  }
+  return {
+    totalAmount,
+    timelineDays,
+    approach: draft.approach.trim(),
+    team: draft.team.trim(),
+    deliverables,
+    milestones,
+  };
+}
+
+function sampleStatusLabel(status: PilotStatus): string {
+  return {
+    collecting: "Collecting proposals",
+    ready: "Deadline reached",
+    revealed: "Proposals revealed",
+    selected: "Proposal selected",
+  }[status];
+}
+
+function formatDeadline(timestamp: number, now: number): string {
+  if (timestamp <= now) return "Deadline passed";
+  const remaining = Math.max(0, Math.ceil((timestamp - now) / 1000));
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s remaining`;
+}
+
+function proposalRows(proposal: ProposalRecord): Array<[string, string]> {
+  return [
+    ["Total", `${proposal.data.totalAmount.toLocaleString()} USDC`],
+    ["Timeline", `${proposal.data.timelineDays} days`],
+    ["Team", proposal.data.team],
+    ["Deliverables", proposal.data.deliverables.join(" | ")],
+  ];
+}
+
+function sampleMilestoneRows(proposal: ProposalRecord): Array<[string, string]> {
+  return proposal.data.milestones.map((milestone) => [
+    milestone.title,
+    `${usdc(milestone.amount)} -> ${shortAddr(milestone.receiver)}${milestone.delivery ? `, ${milestone.delivery}` : ""}`,
+  ]);
+}
+
+function toReceiptOnlyProposal(
+  proposal: ProposalRecord,
+  selectedProviderMeta: string,
+): {
+  timelineDays: number;
+  approach: string;
+  totalAmount: number;
+  currency: string;
+  deliverables: string[];
+  milestones: Array<{
+    title: string;
+    description: string;
+    amount: number;
+    receiver: string;
+    delivery: string;
+  }>;
+  metadata: Record<string, string>;
+} {
+  return {
+    timelineDays: proposal.data.timelineDays,
+    approach: proposal.data.approach,
+    totalAmount: proposal.data.totalAmount,
+    currency: "USDC",
+    deliverables: proposal.data.deliverables,
+    milestones: proposal.data.milestones,
+    metadata: {
+      provider: proposal.provider,
+      providerMeta: selectedProviderMeta,
+      team: proposal.data.team,
+    },
+  };
+}
+
+function proposalSourceLabel(source: ProposalRecord["source"]): string {
+  return source === "live" ? "Live" : source === "sample" ? "Sample" : "Demo";
+}
+
+function txHashFromResult(result: unknown): string | null {
+  const hash = (result as { sendTransactionResponse?: { hash?: unknown } })
+    .sendTransactionResponse?.hash;
+  return typeof hash === "string" && hash ? hash : null;
+}
+
+function trustlessWorkRolesFromDraft(
+  draft: TrustlessWorkDraft,
+  proposal: ProposalRecord,
+): TrustlessWorkRoleConfig {
+  return {
+    approvers: draft.approver
+      .split(/[\s,]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+    serviceProviders: [draft.serviceProvider.trim() || proposal.wallet],
+    platform: draft.platform.trim(),
+    releaseSigners: draft.releaseSigner
+      .split(/[\s,]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+    disputeResolvers: draft.disputeResolver
+      .split(/[\s,]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+    admin: draft.admin.trim(),
+    observers: draft.observers
+      .split(/[\s,]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  };
+}
+
+function buildTrustlessWorkPayload(
+  project: ProjectDraft,
+  proposal: ProposalRecord,
+  draft: TrustlessWorkDraft,
+  signer: string,
+  engagementId: string,
+): TrustlessWorkDeployMultiReleasePayload {
+  const roles = trustlessWorkRolesFromDraft(draft, proposal);
+  const milestones = proposal.data.milestones.map((milestone) => ({
+    description: `${milestone.title} - ${milestone.description}`,
+    amount: milestone.amount,
+    receiver: milestone.receiver,
+  }));
+  const trustline = draft.trustlineContractId.trim()
+    ? { contractId: draft.trustlineContractId.trim() }
+    : {
+        symbol: draft.trustlineSymbol.trim(),
+        address: draft.trustlineAddress.trim(),
+      };
+
+  return validateTrustlessWorkDeployPayload({
+    signer,
+    engagementId,
+    title: project.title,
+    description: project.description,
+    roles,
+    platformFee: parseIntOrZero(draft.platformFee),
+    milestones,
+    trustline,
+    ...(draft.receiverMemo.trim()
+      ? { receiverMemo: parseIntOrZero(draft.receiverMemo) }
+      : {}),
+  });
+}
+
+function emptyReceipt(): TrustlessWorkReceipt {
+  return {
+    deployBuild: null,
+    deploySubmit: null,
+    fundBuild: null,
+    fundSubmit: null,
+    escrowContractId: null,
+    escrow: null,
+    refreshedAt: null,
+  };
+}
+
+function initialState(): PersistedState {
+  const saved = loadPersistedState();
+  const project = saved.project ?? defaultProject();
+  const proposals = saved.proposals?.length ? saved.proposals : seedSampleProposals();
+  const selectedProposalId = saved.selectedProposalId ?? proposals[0]?.id ?? null;
+  const selectedProposal = proposals.find((entry) => entry.id === selectedProposalId);
+  const proposalDraft = saved.proposalDraft ?? defaultProposalDraft();
+  const trustlessWorkDraft =
+    saved.trustlessWorkDraft ?? defaultTrustlessWorkDraft(selectedProposal?.wallet);
+  return {
+    project,
+    mode: saved.mode ?? "sample",
+    role: saved.role ?? "organizer",
+    deadlineAt: saved.deadlineAt ?? nowMs() + deadlineSeconds(project.deadlinePreset) * 1000,
+    roundId: saved.roundId ?? null,
+    roundInput: saved.roundInput ?? (saved.roundId ?? ""),
+    selectedProposalId,
+    proposals,
+    proposalDraft,
+    trustlessWorkDraft,
+    trustlessWorkReceipt: saved.trustlessWorkReceipt ?? emptyReceipt(),
+    transactionHashes: saved.transactionHashes ?? [],
+  };
+}
+
+function shortWallet(value: string | undefined): string {
+  if (!value) return "Not set";
+  return shortAddr(value);
+}
+
+export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
+  const toast = useToast();
+  const saved = useMemo(initialState, []);
+  const [project, setProject] = useState<ProjectDraft>(saved.project);
+  const [mode, setMode] = useState<PilotMode>(saved.mode);
+  const [role, setRole] = useState<PilotRole>(saved.role);
+  const [deadlineAt, setDeadlineAt] = useState(saved.deadlineAt);
+  const [roundId, setRoundId] = useState<string | null>(saved.roundId);
+  const [roundInput, setRoundInput] = useState(saved.roundInput);
+  const [selectedProposalId, setSelectedProposalId] = useState<string | null>(saved.selectedProposalId);
+  const [proposals, setProposals] = useState<ProposalRecord[]>(saved.proposals);
+  const [proposalDraft, setProposalDraft] = useState<ProposalDraft>(saved.proposalDraft);
+  const [trustlessWorkDraft, setTrustlessWorkDraft] = useState<TrustlessWorkDraft>(saved.trustlessWorkDraft);
+  const [trustlessWorkReceipt, setTrustlessWorkReceipt] = useState<TrustlessWorkReceipt>(saved.trustlessWorkReceipt ?? emptyReceipt());
+  const [transactionHashes, setTransactionHashes] = useState<string[]>(saved.transactionHashes);
+  const [address, setAddress] = useState<string | null>(null);
+  const [round, setRound] = useState<RoundV2 | null>(null);
+  const [liveProposals, setLiveProposals] = useState<ProposalRecord[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [now, setNow] = useState(nowMs());
+  const [copied, setCopied] = useState(false);
+  const contract = useWalletContract(address);
+  const reader = useReadOnlyContract();
+  const sdk = useReadOnlySdk();
+  const refreshRequest = useRef(0);
+  const twConfig = resolveTrustlessWorkConfig();
+  const twConfigIssues = trustlessWorkConfigIssues();
+  const liveRoundId = roundId ?? roundInput.trim();
+  const revealCountdown = useDrandCountdown(round ? Number(round.reveal_round) : 0);
+  const selectedProposal = (mode === "live" ? liveProposals : proposals).find((entry) => entry.id === selectedProposalId) ?? null;
+  const deadlinePassed = mode === "live"
+    ? Boolean(round && (round.status.tag !== "Open" || Number(round.commit_deadline) * 1000 <= now))
+    : deadlineAt <= now;
+  const revealed = mode === "live"
+    ? Boolean(round && (round.status.tag === "Revealing" || round.status.tag === "Cleared" || round.status.tag === "Settled"))
+    : proposals.some((entry) => entry.revealed);
+  const status: PilotStatus = selectedProposal
+    ? "selected"
+    : revealed
+      ? "revealed"
+      : deadlinePassed
+        ? "ready"
+        : "collecting";
+  const activeTxHashes = transactionHashes.length > 0 ? transactionHashes : saved.transactionHashes;
+
+  useEffect(() => {
+    savePersistedState({
+      project,
+      mode,
+      role,
+      deadlineAt,
+      roundId,
+      roundInput,
+      selectedProposalId,
+      proposals,
+      proposalDraft,
+      trustlessWorkDraft,
+      trustlessWorkReceipt,
+      transactionHashes,
+    });
+  }, [
+    project,
+    mode,
+    role,
+    deadlineAt,
+    roundId,
+    roundInput,
+    selectedProposalId,
+    proposals,
+    proposalDraft,
+    trustlessWorkDraft,
+    trustlessWorkReceipt,
+    transactionHashes,
+  ]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(nowMs()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (roomHashRoundId()) {
+      const hashRoundId = roomHashRoundId();
+      if (hashRoundId !== liveRoundId) {
+        setMode("live");
+        setRoundInput(hashRoundId);
+        void refreshLive(hashRoundId).catch((error) => {
+          toast.push("error", "Live round load failed", displayError(error));
+        });
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProposal) return;
+    setTrustlessWorkDraft((current) => (
+      current.serviceProvider.trim() === selectedProposal.wallet
+        ? current
+        : { ...current, serviceProvider: selectedProposal.wallet }
+    ));
+  }, [selectedProposal?.wallet]);
+
+  useEffect(() => {
+    if (mode === "live" && reader && liveRoundId) {
+      void refreshLive(liveRoundId).catch((error) => {
+        toast.push("error", "Live round load failed", displayError(error));
+      });
+    }
+  }, [mode, reader, liveRoundId]);
+
+  function roomHashRoundId(): string {
+    return trustlessWorkPilotRoundIdFromHash(window.location.hash);
+  }
+
+  function rememberTransaction(hash: string | null) {
+    if (!hash) return;
+    setTransactionHashes((current) => Array.from(new Set([...current, hash])));
+  }
+
+  async function connect() {
+    setBusy("connect");
+    try {
+      const connected = await isConnected();
+      if (!connected.isConnected) throw new Error("Freighter is not available");
+      const access = await requestAccess();
+      const error = freighterError(access);
+      if (error) throw new Error(error);
+      const nextAddress = await resolveFreighterAddress(access);
+      const network = await getNetworkDetails();
+      if (network.networkPassphrase !== NETWORK) {
+        throw new Error(`Switch Freighter to the configured network (${NETWORK_LABEL})`);
+      }
+      setAddress(nextAddress);
+      if (role === "provider") {
+        setProposalDraft((current) => ({ ...current, providerWallet: nextAddress }));
+      }
+      toast.push("success", "Wallet connected", shortAddr(nextAddress));
+    } catch (error) {
+      toast.push("error", "Wallet connection failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function refreshLive(target = liveRoundId) {
+    if (!reader || !target || !/^\d+$/.test(target)) return;
+    const request = ++refreshRequest.current;
+    const rid = BigInt(target);
+    const roundTx = await reader.get_round_v2({ round_id: rid });
+    const nextRound = roundTx.result.unwrap();
+    const revealed = await Promise.all(
+      nextRound.bidders.map(async (bidder) => {
+        const state = (await reader.get_submission_v2({ round_id: rid, bidder })).result.unwrap();
+        if (state.revealed_envelope == null) return null;
+        return liveProposalFromSubmission(
+          decodePilotSubmission(
+            bidder,
+            nextRound.mode.tag,
+            new Uint8Array(state.revealed_envelope),
+            state.valid,
+          ),
+        );
+      }),
+    );
+    if (request !== refreshRequest.current) return;
+    setRound(nextRound);
+    const revealedEntries = revealed.filter((entry): entry is ProposalRecord => entry !== null);
+    setLiveProposals(revealedEntries);
+    setRoundId(target);
+    setRoundInput(target);
+    setProposals((current) => (
+      current.some((entry) => entry.source === "live")
+        ? current.filter((entry) => entry.source !== "live").concat(revealedEntries)
+        : current.concat(revealedEntries)
+    ));
+  }
+
+  function liveProposalFromSubmission(submission: PilotSubmissionView): ProposalRecord {
+    const details: ProposalDetails = {
+      totalAmount: submission.totalAmount ?? Number(submission.amount ?? "0") / 10_000_000,
+      timelineDays: submission.timelineDays ?? 1,
+      approach: submission.approach ?? "",
+      team: submission.metadata?.team ?? "Stellar wallet",
+      deliverables: submission.deliverables ?? [],
+      milestones: (submission.milestones ?? []).map((milestone) => ({
+        title: milestone.title,
+        description: milestone.description ?? milestone.title,
+        amount: milestone.amount,
+        receiver: milestone.receiver ?? submission.bidder,
+        delivery: milestone.delivery ?? "",
+      })),
+    };
+    return {
+      id: `live-${submission.bidder}`,
+      provider: submission.metadata?.provider ?? shortAddr(submission.bidder),
+      providerMeta: submission.metadata?.providerMeta ?? "Stellar wallet",
+      wallet: submission.bidder,
+      submittedAt: nowMs(),
+      revealed: true,
+      source: "live",
+      data: details,
+    };
+  }
+
+  async function createLiveRound() {
+    if (!contract || !address) {
+      toast.push("error", "Wallet required", "Connect Freighter before creating a live round.");
+      return;
+    }
+    setBusy("create-round");
+    try {
+      if (!CONTRACT_ID) throw new Error("No Core v2 contract is configured for this network");
+      if (!project.title.trim()) throw new Error("Enter a project title");
+      const drand = quicknet();
+      const commitSeconds = deadlineSeconds(project.deadlinePreset);
+      const revealRound = await roundInSeconds(drand, commitSeconds + 15);
+      const info = await drand.chain().info();
+      const revealAt = Number(info.genesis_time) + Number(info.period) * revealRound;
+      const auditor = generateAuditorKeypair();
+      const itemRef = await sha256Bytes(`${project.title}:${address}:${nowMs()}`);
+      const tx = await contract.create_partner_round_v2({
+        operator: address,
+        item_ref: Buffer.from(itemRef),
+        schema_ref: Buffer.from(SEALED_PROPOSAL_SCHEMA_REF),
+        policy: {
+          settlement: {
+            mode: { tag: "ReceiptOnly", values: undefined },
+            payment_asset: undefined,
+            lot_asset: undefined,
+            lot_amount: 0n,
+          },
+          fixed_escrow: 0n,
+          eligible_participants: [],
+        },
+        reveal_round: BigInt(revealRound),
+        clearing_rule: { tag: "LowestBid", values: undefined },
+        commit_deadline: BigInt(revealAt - 10),
+        reveal_deadline: BigInt(revealAt + 300),
+        auditor_pubkey: Buffer.from(auditor.publicKey),
+        max_participants: 25,
+      });
+      const sent = await tx.signAndSend();
+      const nextId = sent.result.unwrap().toString();
+      const hash = txHashFromResult(sent);
+      if (hash) rememberTransaction(hash);
+      setMode("live");
+      setRoundId(nextId);
+      setRoundInput(nextId);
+      setDeadlineAt((revealAt - 10) * 1000);
+      window.location.hash = `#/pilot/trustless-work/${nextId}`;
+      await refreshLive(nextId);
+      toast.push("success", "Live round created", `ReceiptOnly round #${nextId}`);
+    } catch (error) {
+      toast.push("error", "Round creation failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function loadLiveRound() {
+    setBusy("load-round");
+    try {
+      const target = roundInput.trim();
+      if (!/^\d+$/.test(target)) throw new Error("Round ID must be a whole number");
+      setMode("live");
+      setRoundId(target);
+      window.location.hash = `#/pilot/trustless-work/${target}`;
+      await refreshLive(target);
+      toast.push("success", "Live round selected", `ReceiptOnly round #${target}`);
+    } catch (error) {
+      toast.push("error", "Live round load failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function resetWorkspace() {
+    const nextProject = defaultProject();
+    const nextProposalDraft = defaultProposalDraft();
+    const nextProposals = seedSampleProposals();
+    const nextSelected = nextProposals[0]?.id ?? null;
+    const nextSelectedProposal = nextProposals.find((entry) => entry.id === nextSelected);
+    setProject(nextProject);
+    setMode("sample");
+    setRole("organizer");
+    setDeadlineAt(nowMs() + deadlineSeconds(nextProject.deadlinePreset) * 1000);
+    setRoundId(null);
+    setRoundInput("");
+    setSelectedProposalId(nextSelected);
+    setProposals(nextProposals);
+    setProposalDraft(nextProposalDraft);
+    setTrustlessWorkDraft(defaultTrustlessWorkDraft(nextSelectedProposal?.wallet));
+    setTrustlessWorkReceipt(emptyReceipt());
+    setTransactionHashes([]);
+    setRound(null);
+    setLiveProposals([]);
+    window.location.hash = "#/pilot/trustless-work";
+  }
+
+  function updateProject<K extends keyof ProjectDraft>(key: K, value: ProjectDraft[K]) {
+    setProject((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateProposal<K extends keyof ProposalDraft>(key: K, value: ProposalDraft[K]) {
+    setProposalDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateMilestone(index: number, key: keyof ProposalMilestoneDraft, value: string) {
+    setProposalDraft((current) => {
+      const milestones = current.milestones.slice();
+      milestones[index] = { ...milestones[index], [key]: value };
+      return { ...current, milestones };
+    });
+  }
+
+  function addMilestone() {
+    setProposalDraft((current) => ({
+      ...current,
+      milestones: [
+        ...current.milestones,
+        {
+          title: "",
+          description: "",
+          amount: "",
+          receiver: sampleWallet(60 + current.milestones.length),
+          delivery: "",
+        },
+      ],
+    }));
+  }
+
+  function removeMilestone(index: number) {
+    setProposalDraft((current) => ({
+      ...current,
+      milestones: current.milestones.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  }
+
+  function updateTrustlessWorkDraft<K extends keyof TrustlessWorkDraft>(
+    key: K,
+    value: TrustlessWorkDraft[K],
+  ) {
+    setTrustlessWorkDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function createSampleProposal() {
+    try {
+      const details = buildProposalDetails(proposalDraft);
+      const newRecord: ProposalRecord = {
+        id: `demo-${nowMs().toString(36)}`,
+        provider: proposalDraft.providerName.trim(),
+        providerMeta: proposalDraft.providerMeta.trim() || "Invited provider",
+        wallet: proposalDraft.providerWallet.trim(),
+        submittedAt: nowMs(),
+        revealed: false,
+        source: "demo",
+        data: details,
+      };
+      setProposals((current) => [...current, newRecord]);
+      setSelectedProposalId(newRecord.id);
+      setTrustlessWorkDraft((current) => ({ ...current, serviceProvider: newRecord.wallet }));
+      setRole("provider");
+      toast.push("success", "Private proposal stored", "Sample sealed proposal added to the workspace.");
+    } catch (error) {
+      toast.push("error", "Proposal validation failed", displayError(error));
+    }
+  }
+
+  async function submitLiveProposal() {
+    if (!contract || !address || !round || !liveRoundId) {
+      toast.push("error", "Live round required", "Connect a wallet and load or create a live round first.");
+      return;
+    }
+    setBusy("submit-proposal");
+    try {
+      if (round.status.tag !== "Open") throw new Error("This round is no longer accepting offers");
+      const details = buildProposalDetails(proposalDraft);
+      const drand = quicknet();
+      const sealed = await sealProposal({
+        round: Number(round.reveal_round),
+        drand,
+        identity: new TextEncoder().encode(address),
+        auditorPublicKey: new Uint8Array(round.auditor_pubkey),
+        price: BigInt(Math.round(details.totalAmount * 10_000_000)),
+        proposal: {
+          timelineDays: details.timelineDays,
+          approach: details.approach,
+          totalAmount: details.totalAmount,
+          currency: "USDC",
+          deliverables: details.deliverables,
+          milestones: details.milestones.map((milestone) => ({
+            title: milestone.title,
+            description: milestone.description,
+            amount: milestone.amount,
+            receiver: milestone.receiver,
+            delivery: milestone.delivery,
+          })),
+          metadata: {
+            provider: proposalDraft.providerName.trim(),
+            providerMeta: proposalDraft.providerMeta.trim(),
+            providerWallet: proposalDraft.providerWallet.trim(),
+            team: details.team,
+          },
+        },
+      });
+      const tx = await contract.commit_v2({
+        round_id: BigInt(liveRoundId),
+        bidder: address,
+        commitment: Buffer.from(sealed.commitment),
+        ciphertext: Buffer.from(sealed.ciphertext),
+        escrow: 0n,
+        auditor_blob: Buffer.from(sealed.auditorBlob),
+      });
+      const sent = await tx.signAndSend();
+      const hash = txHashFromResult(sent);
+      if (hash) rememberTransaction(hash);
+      setProposals((current) => [
+        ...current.filter((entry) => entry.source !== "live" || entry.wallet !== address),
+        {
+          id: `live-${address}`,
+          provider: proposalDraft.providerName.trim(),
+          providerMeta: proposalDraft.providerMeta.trim(),
+          wallet: address,
+          submittedAt: nowMs(),
+          revealed: false,
+          source: "live",
+          data: details,
+        },
+      ]);
+      setRole("organizer");
+      toast.push("success", "Private proposal submitted", `Sealed on ReceiptOnly round #${liveRoundId}`);
+    } catch (error) {
+      toast.push("error", "Proposal submission failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function revealSampleProposals() {
+    if (!deadlinePassed || revealed || selectedProposal?.source === "live") return;
+    setProposals((current) => current.map((entry) => ({ ...entry, revealed: true })));
+    toast.push("success", "Sample proposals revealed", "All sample submissions are now visible.");
+  }
+
+  async function revealLiveProposals() {
+    if (!contract || !round || !liveRoundId) return;
+    if (round.status.tag === "Open" && !revealCountdown.published) return;
+    setBusy("reveal");
+    try {
+      const rid = BigInt(liveRoundId);
+      const drand = quicknet();
+      let current = (await contract.get_round_v2({ round_id: rid })).result.unwrap();
+      if (current.status.tag === "Open") {
+        const signature = await fetchRoundSignature(drand, Number(current.reveal_round));
+        try {
+          const open = await contract.open_reveal_v2({ round_id: rid, drand_signature: Buffer.from(signature) });
+          const sent = await open.signAndSend();
+          rememberTransaction(txHashFromResult(sent));
+        } catch (error) {
+          if (!isRevealAlreadyOpen(error)) throw error;
+        }
+        current = (await contract.get_round_v2({ round_id: rid })).result.unwrap();
+      }
+      const bidders = (await contract.get_bidders_v2({ round_id: rid })).result.unwrap();
+      let revealedCount = 0;
+      for (const bidder of bidders) {
+        const state = (await contract.get_submission_v2({ round_id: rid, bidder })).result.unwrap();
+        if (state.revealed_envelope != null) continue;
+        const seal = (await contract.get_seal_v2({ round_id: rid, bidder })).result;
+        if (!seal) throw new Error(`Encrypted offer is unavailable for ${shortAddr(bidder)}`);
+        const envelope = await openPayload(new Uint8Array(seal.ciphertext), drand);
+        try {
+          const reveal = await contract.reveal_v2({
+            round_id: rid,
+            bidder,
+            envelope: Buffer.from(encodePayloadEnvelope(envelope)),
+          });
+          const sent = await reveal.signAndSend();
+          rememberTransaction(txHashFromResult(sent));
+          revealedCount += 1;
+        } catch (error) {
+          if (!isSubmissionAlreadyRevealed(error)) throw error;
+        }
+      }
+      await refreshLive();
+      toast.push("success", "Proposals revealed", `${revealedCount} on-chain submission(s) opened`);
+    } catch (error) {
+      toast.push("error", "Reveal failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function selectProposal(id: string) {
+    setSelectedProposalId(id);
+    const next = (mode === "live" ? liveProposals : proposals).find((entry) => entry.id === id);
+    if (next) {
+      setTrustlessWorkDraft((current) => ({ ...current, serviceProvider: next.wallet }));
+    }
+  }
+
+  async function createTrustlessWorkEscrow() {
+    if (!twConfig) {
+      toast.push("error", "Trustless Work config missing", "Set VITE_TRUSTLESS_WORK_API_KEY before creating an escrow.");
+      return;
+    }
+    if (!address) {
+      toast.push("error", "Wallet required", "Connect Freighter before creating a Trustless Work escrow.");
+      return;
+    }
+    if (!selectedProposal) {
+      toast.push("error", "Select a proposal first", "Choose the winning proposal before creating the escrow.");
+      return;
+    }
+    setBusy("deploy-escrow");
+    try {
+      const engagementId = roundId ? `sub-rosa-round-${roundId}` : `sub-rosa-sample-${project.title.toLowerCase().replace(/\s+/g, "-")}`;
+      const payload = buildTrustlessWorkPayload(project, selectedProposal, trustlessWorkDraft, address, engagementId);
+      const build = await buildMultiReleaseEscrow(twConfig, payload);
+      const contractIdFromBuild = readContractId(build.contractId);
+      const signed = await signTransaction(build.unsignedXdr, {
+        networkPassphrase: NETWORK,
+        address,
+      });
+      const signedError = freighterError(signed);
+      if (signedError) throw new Error(signedError);
+      const submit = await sendSignedTransaction(twConfig, signed.signedTxXdr);
+      const escrowContractId = submit.contractId ?? contractIdFromBuild ?? null;
+      setTrustlessWorkReceipt((current) => ({
+        ...current,
+        deployBuild: build,
+        deploySubmit: submit,
+        escrowContractId,
+        escrow: submit.escrow ?? current?.escrow ?? null,
+        refreshedAt: nowMs(),
+      }));
+      rememberTransaction(build.txHash);
+      rememberTransaction(submit.txHash);
+      if (submit.code === "STELLAR_TX_SUBMITTED_INDEXER_LAGGING") {
+        toast.push("info", "Trustless Work escrow submitted", "The tx landed, but the indexer has not caught up yet.");
+      } else {
+        toast.push("success", "Trustless Work escrow created", submit.contractId ? shortHash(submit.contractId) : "Escrow submitted");
+      }
+    } catch (error) {
+      toast.push("error", "Escrow creation failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function fundTrustlessWorkEscrow() {
+    if (!twConfig) {
+      toast.push("error", "Trustless Work config missing", "Set VITE_TRUSTLESS_WORK_API_KEY before funding an escrow.");
+      return;
+    }
+    if (!address) {
+      toast.push("error", "Wallet required", "Connect Freighter before funding the escrow.");
+      return;
+    }
+    const contractId = trustlessWorkReceipt.escrowContractId;
+    if (!contractId) {
+      toast.push("error", "Escrow not created yet", "Create the escrow before funding it.");
+      return;
+    }
+    if (!selectedProposal) {
+      toast.push("error", "Select a proposal first", "Choose the winning proposal before funding.");
+      return;
+    }
+    setBusy("fund-escrow");
+    try {
+      const build = await fundMultiReleaseEscrow(twConfig, {
+        contractId,
+        signer: address,
+        amount: selectedProposal.data.totalAmount,
+      });
+      const signed = await signTransaction(build.unsignedXdr, {
+        networkPassphrase: NETWORK,
+        address,
+      });
+      const signedError = freighterError(signed);
+      if (signedError) throw new Error(signedError);
+      const submit = await sendSignedTransaction(twConfig, signed.signedTxXdr);
+      setTrustlessWorkReceipt((current) => ({
+        ...current,
+        fundBuild: build,
+        fundSubmit: submit,
+        escrowContractId: submit.contractId ?? current.escrowContractId ?? contractId,
+        refreshedAt: nowMs(),
+      }));
+      rememberTransaction(build.txHash);
+      rememberTransaction(submit.txHash);
+      toast.push("success", "Escrow funding submitted", submit.message || "Funding tx submitted to Stellar");
+    } catch (error) {
+      toast.push("error", "Escrow funding failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function refreshTrustlessWorkEscrow() {
+    if (!twConfig || !trustlessWorkReceipt.escrowContractId) return;
+    setBusy("refresh-escrow");
+    try {
+      const next = await getEscrowByContractId(twConfig, trustlessWorkReceipt.escrowContractId);
+      setTrustlessWorkReceipt((current) => ({
+        ...current,
+        escrow: next.escrow,
+        refreshedAt: nowMs(),
+      }));
+      toast.push("success", "Escrow refreshed", shortHash(trustlessWorkReceipt.escrowContractId));
+    } catch (error) {
+      toast.push("error", "Escrow refresh failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function downloadReceipt() {
+    if (!sdk || !roundId || !round) return;
+    setBusy("receipt");
+    try {
+      const receipt = await sdk.exportReceiptV2(BigInt(roundId));
+      const verification = verifyReceiptV2(receipt);
+      if (!verification.valid) throw new Error("Receipt verification failed");
+      const blob = new Blob([serializeReceiptV2(receipt)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `sub-rosa-trustless-work-round-${roundId}-receipt.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.push("success", "Receipt verified", `Round #${roundId} downloaded`);
+    } catch (error) {
+      toast.push("error", "Receipt export failed", displayError(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copyLink() {
+    const suffix = mode === "live" && liveRoundId ? `/${liveRoundId}` : "";
+    const url = `${window.location.origin}${window.location.pathname}#/pilot/trustless-work${suffix}`;
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  function updateTrustlessWorkRole(field: keyof TrustlessWorkDraft, value: string) {
+    updateTrustlessWorkDraft(field, value);
+  }
+
+  function selectedProposalPreview(): Array<[string, string]> {
+    if (!selectedProposal) return [];
+    return [
+      ["Provider", selectedProposal.provider],
+      ["Total", `${selectedProposal.data.totalAmount.toLocaleString()} USDC`],
+      ["Timeline", `${selectedProposal.data.timelineDays} days`],
+      ["Team", selectedProposal.data.team],
+      ["Receivers", selectedProposal.data.milestones.map((milestone) => shortAddr(milestone.receiver)).join(" | ")],
+    ];
+  }
+
+  const bridgeSteps = [
+    { label: "Create project", done: true },
+    { label: "Private proposals", done: (mode === "live" ? liveProposals.length : proposals.length) > 0 },
+    { label: "Deadline", done: deadlinePassed },
+    { label: "Reveal", done: revealed },
+    { label: "Select winner", done: Boolean(selectedProposal) },
+    { label: "Create escrow", done: Boolean(trustlessWorkReceipt.deploySubmit?.txHash || trustlessWorkReceipt.escrowContractId) },
+    { label: "Fund escrow", done: Boolean(trustlessWorkReceipt.fundSubmit?.txHash) },
+  ];
+
+  function proposalList(): ProposalRecord[] {
+    return mode === "live" ? liveProposals : proposals;
+  }
+
+  return (
+    <main className="pilot-page trustless-work-pilot-page">
+      <nav className="pilot-nav">
+        <button type="button" className="brand-link" onClick={goHome}>
+          <img src={LOGO_SRC} alt="" />
+          <span>Sub Rosa</span>
+        </button>
+        <div className="pilot-nav-actions">
+          <span className="pilot-network">{twConfig ? "Trustless Work testnet pilot" : "Testnet integration pilot"}</span>
+          <div className="pilot-template-switch" role="tablist" aria-label="Pilot mode">
+            <button type="button" className={mode === "sample" ? "active" : ""} onClick={() => setMode("sample")}>Sample</button>
+            <button type="button" className={mode === "live" ? "active" : ""} onClick={() => setMode("live")}>Live</button>
+          </div>
+          <a href="#/docs" className="secondary-action compact">Docs</a>
+          <button type="button" className="secondary-action compact" onClick={copyLink}>
+            {copied ? "Copied" : "Copy link"}
+          </button>
+          <button type="button" className="secondary-action compact" onClick={connect} disabled={busy !== null}>
+            {address ? shortAddr(address) : busy === "connect" ? "Connecting..." : "Connect wallet"}
+          </button>
+        </div>
+      </nav>
+
+      <header className="pilot-header">
+        <div>
+          <span className="pilot-kicker"><ShieldCheck size={15} /> Testnet integration pilot</span>
+          <h1>Sub Rosa x Trustless Work</h1>
+          <p className="lede">Private proposals stay sealed through the deadline, then the chosen proposal is converted into a real Trustless Work multi-release escrow on testnet.</p>
+        </div>
+        <div className="pilot-template-switch" aria-label="Role">
+          <button type="button" className={role === "organizer" ? "active" : ""} onClick={() => setRole("organizer")}>Organizer</button>
+          <button type="button" className={role === "provider" ? "active" : ""} onClick={() => setRole("provider")}>Provider</button>
+        </div>
+      </header>
+
+      {(twConfigIssues.length > 0 || !CONTRACT_ID) && (
+        <div className="pilot-alert">
+          {twConfigIssues.length > 0 && <div>{twConfigIssues.join(" ")}</div>}
+          {!CONTRACT_ID && <div>Sub Rosa VITE_CONTRACT_ID is not configured.</div>}
+        </div>
+      )}
+
+      <section className="signal-pilot-flow" aria-label="Pilot flow">
+        {bridgeSteps.map((step, index) => (
+          <div className={step.done ? "done" : ""} key={step.label}>
+            <span>{step.done ? <CheckCircle2 size={15} /> : index + 1}</span>
+            <strong>{step.label}</strong>
+            {index < bridgeSteps.length - 1 && <ArrowRight size={15} aria-hidden="true" />}
+          </div>
+        ))}
+      </section>
+
+      <section className="pilot-layout">
+        <div className="pilot-panel">
+          <div className="pilot-panel-heading">
+            <span>Project</span>
+            <strong>RFP setup</strong>
+          </div>
+          <div className="pilot-form">
+            <label>
+              Project title
+              <input value={project.title} onChange={(event) => updateProject("title", event.target.value)} />
+            </label>
+            <label>
+              Project description
+              <textarea rows={3} value={project.description} onChange={(event) => updateProject("description", event.target.value)} />
+            </label>
+            <div className="pilot-facts">
+              <div><dt>Budget</dt><dd>{project.budget} USDC</dd></div>
+              <div><dt>Deadline</dt><dd>{deadlineLabel(project.deadlinePreset)}</dd></div>
+              <div><dt>Status</dt><dd>{sampleStatusLabel(status)}</dd></div>
+              <div><dt>Round ID</dt><dd>{roundId ? `#${roundId}` : "Not created"}</dd></div>
+            </div>
+            <label>
+              Proposal window
+              <select value={project.deadlinePreset} onChange={(event) => updateProject("deadlinePreset", event.target.value as DeadlinePreset)}>
+                {DEADLINE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            {mode === "live" && (
+              <div className="signal-live-load">
+                <label>
+                  Existing live round ID
+                  <input inputMode="numeric" placeholder="e.g. 12" value={roundInput} onChange={(event) => setRoundInput(event.target.value)} />
+                </label>
+                <button type="button" className="secondary-action compact" onClick={loadLiveRound} disabled={busy !== null}>
+                  <RefreshCw size={15} />
+                  Load round
+                </button>
+              </div>
+            )}
+            <div className="pilot-actions">
+              <button type="button" className="primary-action" onClick={mode === "live" ? createLiveRound : undefined} disabled={busy !== null || !address}>
+                {busy === "create-round" ? "Creating..." : <><FileCheck2 size={16} />Create live round</>}
+              </button>
+              <button type="button" className="secondary-action" onClick={resetWorkspace} disabled={busy !== null}>
+                <RefreshCw size={16} />
+                Reset workspace
+              </button>
+            </div>
+            <p className="signal-helper">{mode === "live" ? `Creates a real Core v2 ReceiptOnly round with a ${deadlineLabel(project.deadlinePreset)} commit window.` : "Sample mode uses local sealed proposals. Switch to Live to create a real on-chain round."}</p>
+          </div>
+        </div>
+
+        <div className="pilot-panel">
+          <div className="pilot-panel-heading">
+            <span>Organizer</span>
+            <strong>{revealed ? "Compare proposals" : "Private submission count"}</strong>
+          </div>
+          <div className="signal-private-state">
+            <LockKeyhole size={18} />
+            <div>
+              <strong>{revealed ? "Proposals are now visible" : "Proposals stay private until the deadline"}</strong>
+              <p>{revealed ? "Sub Rosa verifies the sealed process. The organizer makes the business selection." : "Provider names may be visible, but pricing, timeline, approach, and milestone plan remain sealed."}</p>
+            </div>
+          </div>
+          <div className="signal-provider-list">
+            {proposalList().map((proposal) => (
+              <div key={proposal.id}>
+                <span className="signal-provider-dot" />
+                <div>
+                  <strong>{shortWallet(proposal.wallet)}</strong>
+                  <span>{proposal.providerMeta}</span>
+                </div>
+                <code>{proposal.revealed ? "revealed" : "sealed"}</code>
+              </div>
+            ))}
+          </div>
+          <div className="pilot-actions">
+            {mode === "sample" && !deadlinePassed && (
+              <button type="button" className="secondary-action" onClick={() => setDeadlineAt(nowMs() - 1000)}>
+                <LockKeyhole size={16} />
+                Fast-forward deadline
+              </button>
+            )}
+            {mode === "sample" && deadlinePassed && !revealed && (
+              <button type="button" className="primary-action" onClick={revealSampleProposals}>
+                <UnlockIcon />
+                Reveal sample proposals
+              </button>
+            )}
+            {mode === "live" && liveRoundId && !deadlinePassed && (
+              <span className="signal-reveal-note"><LockKeyhole size={15} />Commit deadline is still open</span>
+            )}
+            {mode === "live" && liveRoundId && deadlinePassed && !revealed && (
+              <button type="button" className="primary-action" onClick={revealLiveProposals} disabled={busy !== null || !revealCountdown.published}>
+                <UnlockIcon />
+                {busy === "reveal" ? "Revealing..." : revealCountdown.published ? "Open + reveal on-chain" : `Reveal in ${revealCountdown.secondsRemaining}s`}
+              </button>
+            )}
+            {revealed && <span className="signal-reveal-note"><CheckCircle2 size={15} />All offers opened together</span>}
+          </div>
+        </div>
+
+        <aside className="pilot-panel">
+          <div className="pilot-panel-heading">
+            <span>{role === "organizer" ? "Handoff" : "Provider"}</span>
+            <strong>{role === "organizer" ? "Trustless Work preview" : "Private proposal"}</strong>
+          </div>
+
+          {role === "provider" ? (
+            <div className="pilot-form">
+              <label>
+                Provider name
+                <input value={proposalDraft.providerName} onChange={(event) => updateProposal("providerName", event.target.value)} />
+              </label>
+              <label>
+                Provider meta
+                <input value={proposalDraft.providerMeta} onChange={(event) => updateProposal("providerMeta", event.target.value)} />
+              </label>
+              <label>
+                Provider wallet
+                <input value={proposalDraft.providerWallet} onChange={(event) => updateProposal("providerWallet", event.target.value)} />
+              </label>
+              <div className="signal-form-grid">
+                <label>
+                  Total amount
+                  <input inputMode="numeric" value={proposalDraft.totalAmount} onChange={(event) => updateProposal("totalAmount", event.target.value)} />
+                </label>
+                <label>
+                  Timeline (days)
+                  <input inputMode="numeric" value={proposalDraft.timelineDays} onChange={(event) => updateProposal("timelineDays", event.target.value)} />
+                </label>
+              </div>
+              <label>
+                Approach
+                <textarea rows={3} value={proposalDraft.approach} onChange={(event) => updateProposal("approach", event.target.value)} />
+              </label>
+              <label>
+                Team
+                <input value={proposalDraft.team} onChange={(event) => updateProposal("team", event.target.value)} />
+              </label>
+              <label>
+                Deliverables
+                <textarea rows={3} value={proposalDraft.deliverables} onChange={(event) => updateProposal("deliverables", event.target.value)} />
+              </label>
+              <div className="pilot-panel-heading" style={{ minHeight: 0, padding: "0 0 4px", borderBottom: 0 }}>
+                <span>Milestones</span>
+                <button type="button" className="secondary-action compact" onClick={addMilestone}><Upload size={14} />Add milestone</button>
+              </div>
+              <div className="trustless-work-pilot-milestones">
+                {proposalDraft.milestones.map((milestone, index) => (
+                  <div key={`${milestone.title}-${index}`} className="trustless-work-pilot-milestone">
+                    <div className="signal-form-grid">
+                      <label>
+                        Title
+                        <input value={milestone.title} onChange={(event) => updateMilestone(index, "title", event.target.value)} />
+                      </label>
+                      <label>
+                        Amount
+                        <input inputMode="numeric" value={milestone.amount} onChange={(event) => updateMilestone(index, "amount", event.target.value)} />
+                      </label>
+                    </div>
+                    <label>
+                      Description
+                      <textarea rows={2} value={milestone.description} onChange={(event) => updateMilestone(index, "description", event.target.value)} />
+                    </label>
+                    <div className="signal-form-grid">
+                      <label>
+                        Receiver
+                        <input value={milestone.receiver} onChange={(event) => updateMilestone(index, "receiver", event.target.value)} />
+                      </label>
+                      <label>
+                        Delivery
+                        <input value={milestone.delivery} onChange={(event) => updateMilestone(index, "delivery", event.target.value)} />
+                      </label>
+                    </div>
+                    <button type="button" className="secondary-action compact" onClick={() => removeMilestone(index)} disabled={proposalDraft.milestones.length === 1}>
+                      <X size={14} />
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="primary-action" onClick={mode === "live" ? submitLiveProposal : createSampleProposal} disabled={busy !== null || (mode === "live" && (!round || !liveRoundId))}>
+                <LockKeyhole size={16} />
+                {mode === "live" ? (busy === "submit-proposal" ? "Waiting for wallet..." : "Submit private proposal on-chain") : "Submit private proposal"}
+              </button>
+              <p className="signal-helper">The sealed proposal carries total amount, timeline, approach, deliverables, and milestone plan. Before reveal, those fields stay hidden.</p>
+            </div>
+          ) : (
+            <div className="pilot-form">
+              <div className="pilot-facts">
+                <div><dt>Selected provider</dt><dd>{selectedProposal ? selectedProposal.provider : "Not selected"}</dd></div>
+                <div><dt>Proposal total</dt><dd>{selectedProposal ? `${selectedProposal.data.totalAmount.toLocaleString()} USDC` : "Not set"}</dd></div>
+                <div><dt>Status</dt><dd>{sampleStatusLabel(status)}</dd></div>
+                <div><dt>Trustless Work</dt><dd>{twConfig ? twConfig.baseUrl : "Config missing"}</dd></div>
+              </div>
+              {selectedProposal && (
+                <>
+                  <div className="signal-private-state">
+                    <ShieldCheck size={18} />
+                    <div>
+                      <strong>{"Selected proposal -> Trustless Work preview"}</strong>
+                      <p>The preview below shows the exact fields that will be sent to Trustless Work v2 testnet.</p>
+                    </div>
+                  </div>
+                  <div className="pilot-facts">
+                    {selectedProposalPreview().map(([label, value]) => (
+                      <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+                    ))}
+                  </div>
+                  <div className="signal-receipt-grid">
+                    <dl>
+                      <div><dt>Platform fee</dt><dd>{trustlessWorkDraft.platformFee}%</dd></div>
+                      <div><dt>Approver</dt><dd>{shortWallet(trustlessWorkDraft.approver)}</dd></div>
+                      <div><dt>Service provider</dt><dd>{shortWallet(trustlessWorkDraft.serviceProvider || selectedProposal.wallet)}</dd></div>
+                      <div><dt>Platform</dt><dd>{shortWallet(trustlessWorkDraft.platform)}</dd></div>
+                    </dl>
+                    <dl>
+                      <div><dt>Release signer</dt><dd>{shortWallet(trustlessWorkDraft.releaseSigner)}</dd></div>
+                      <div><dt>Dispute resolver</dt><dd>{shortWallet(trustlessWorkDraft.disputeResolver)}</dd></div>
+                      <div><dt>Admin</dt><dd>{shortWallet(trustlessWorkDraft.admin)}</dd></div>
+                      <div><dt>Trustline</dt><dd>{trustlessWorkDraft.trustlineContractId || `${trustlessWorkDraft.trustlineSymbol} / ${shortWallet(trustlessWorkDraft.trustlineAddress)}`}</dd></div>
+                    </dl>
+                  </div>
+                  <div className="trustless-work-pilot-milestones">
+                    {selectedProposal.data.milestones.map((milestone) => (
+                      <div key={`${selectedProposal.id}-${milestone.title}`} className="trustless-work-pilot-milestone">
+                        <div className="pilot-facts">
+                          <div><dt>Milestone</dt><dd>{milestone.title}</dd></div>
+                          <div><dt>Amount</dt><dd>{usdc(milestone.amount)} USDC</dd></div>
+                          <div><dt>Receiver</dt><dd>{shortWallet(milestone.receiver)}</dd></div>
+                          <div><dt>Delivery</dt><dd>{milestone.delivery}</dd></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pilot-form" style={{ paddingInline: 0 }}>
+                    <label>
+                      Platform fee
+                      <input inputMode="numeric" value={trustlessWorkDraft.platformFee} onChange={(event) => updateTrustlessWorkRole("platformFee", event.target.value)} />
+                    </label>
+                    <div className="signal-form-grid">
+                      <label>
+                        Approver
+                        <input value={trustlessWorkDraft.approver} onChange={(event) => updateTrustlessWorkRole("approver", event.target.value)} />
+                      </label>
+                      <label>
+                        Release signer
+                        <input value={trustlessWorkDraft.releaseSigner} onChange={(event) => updateTrustlessWorkRole("releaseSigner", event.target.value)} />
+                      </label>
+                    </div>
+                    <div className="signal-form-grid">
+                      <label>
+                        Platform
+                        <input value={trustlessWorkDraft.platform} onChange={(event) => updateTrustlessWorkRole("platform", event.target.value)} />
+                      </label>
+                      <label>
+                        Dispute resolver
+                        <input value={trustlessWorkDraft.disputeResolver} onChange={(event) => updateTrustlessWorkRole("disputeResolver", event.target.value)} />
+                      </label>
+                    </div>
+                    <div className="signal-form-grid">
+                      <label>
+                        Admin
+                        <input value={trustlessWorkDraft.admin} onChange={(event) => updateTrustlessWorkRole("admin", event.target.value)} />
+                      </label>
+                      <label>
+                        Service provider
+                        <input value={trustlessWorkDraft.serviceProvider} onChange={(event) => updateTrustlessWorkRole("serviceProvider", event.target.value)} />
+                      </label>
+                    </div>
+                    <label>
+                      Observers (comma or space separated)
+                      <textarea rows={2} value={trustlessWorkDraft.observers} onChange={(event) => updateTrustlessWorkRole("observers", event.target.value)} />
+                    </label>
+                    <div className="signal-form-grid">
+                      <label>
+                        Trustline contract ID
+                        <input value={trustlessWorkDraft.trustlineContractId} onChange={(event) => updateTrustlessWorkRole("trustlineContractId", event.target.value)} />
+                      </label>
+                      <label>
+                        Trustline symbol
+                        <input value={trustlessWorkDraft.trustlineSymbol} onChange={(event) => updateTrustlessWorkRole("trustlineSymbol", event.target.value)} />
+                      </label>
+                    </div>
+                    <div className="signal-form-grid">
+                      <label>
+                        Trustline address
+                        <input value={trustlessWorkDraft.trustlineAddress} onChange={(event) => updateTrustlessWorkRole("trustlineAddress", event.target.value)} />
+                      </label>
+                      <label>
+                        Receiver memo
+                        <input inputMode="numeric" value={trustlessWorkDraft.receiverMemo} onChange={(event) => updateTrustlessWorkRole("receiverMemo", event.target.value)} />
+                      </label>
+                    </div>
+                    <div className="pilot-actions">
+                      <button type="button" className="primary-action" onClick={createTrustlessWorkEscrow} disabled={!selectedProposal || busy !== null || !twConfig}>
+                        <Sparkles size={16} />
+                        Create Multi-Release Escrow
+                      </button>
+                      <button type="button" className="secondary-action" onClick={fundTrustlessWorkEscrow} disabled={!trustlessWorkReceipt.escrowContractId || busy !== null || !twConfig}>
+                        <WalletCards size={16} />
+                        Fund escrow
+                      </button>
+                    </div>
+                    <div className="pilot-actions">
+                      <button type="button" className="secondary-action" onClick={refreshTrustlessWorkEscrow} disabled={!trustlessWorkReceipt.escrowContractId || busy !== null || !twConfig}>
+                        <RefreshCw size={16} />
+                        Refresh escrow
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+              {!selectedProposal && <div className="pilot-empty">Select a revealed proposal to build the Trustless Work escrow preview.</div>}
+              {!twConfig && <div className="pilot-empty">Add a Trustless Work API key to create a real testnet escrow.</div>}
+            </div>
+          )}
+        </aside>
+
+        {revealed && (
+          <section className="pilot-results-panel">
+            <div className="pilot-panel-heading">
+              <span>Selection</span>
+              <strong>Compare revealed proposals</strong>
+            </div>
+            <div className="signal-offer-grid">
+              {proposalList().filter((entry) => entry.revealed).map((entry) => (
+                <article className={`signal-offer ${selectedProposalId === entry.id ? "selected" : ""}`} key={entry.id}>
+                  <div className="signal-offer-heading">
+                    <div>
+                      <span>{proposalSourceLabel(entry.source)} proposal</span>
+                      <h3>{entry.provider}</h3>
+                    </div>
+                    {selectedProposalId === entry.id && <span className="signal-selected-badge"><CheckCircle2 size={14} />Selected</span>}
+                  </div>
+                  <dl>
+                    {proposalRows(entry).map(([label, value]) => (
+                      <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+                    ))}
+                  </dl>
+                  <div className="signal-private-state">
+                    <LockKeyhole size={18} />
+                    <div>
+                      <strong>Milestone plan</strong>
+                      <p>{entry.data.milestones.map((milestone) => `${milestone.title} ${usdc(milestone.amount)} USDC`).join(" | ")}</p>
+                    </div>
+                  </div>
+                  <button type="button" className={selectedProposalId === entry.id ? "secondary-action compact" : "primary-action compact"} onClick={() => selectProposal(entry.id)}>
+                    {selectedProposalId === entry.id ? "Selected proposal" : "Select proposal"}
+                    <ArrowRight size={15} />
+                  </button>
+                </article>
+              ))}
+            </div>
+            <p className="signal-selection-note"><ShieldCheck size={15} />Sub Rosa verifies the sealed proposal process. The organizer makes the business selection.</p>
+          </section>
+        )}
+
+        <section className="pilot-results-panel">
+          <div className="pilot-panel-heading">
+            <span>Receipt</span>
+            <strong>Combined pilot evidence</strong>
+          </div>
+          <div className="signal-receipt-grid">
+            <dl>
+              <div><dt>Sub Rosa network</dt><dd>{STELLAR_NETWORK === "mainnet" ? NETWORK_LABEL : `${NETWORK_LABEL} · testnet`}</dd></div>
+              <div><dt>Round ID</dt><dd>{roundId ? `#${roundId}` : "Sample only"}</dd></div>
+              <div><dt>Mode</dt><dd>ReceiptOnly</dd></div>
+              <div><dt>Participants</dt><dd>{proposalList().length}</dd></div>
+              <div><dt>Reveal state</dt><dd>{revealed ? "Revealed" : "Sealed"}</dd></div>
+              <div><dt>Selected proposal</dt><dd>{selectedProposal ? selectedProposal.provider : "Not selected"}</dd></div>
+            </dl>
+            <dl>
+              <div><dt>Trustless Work network</dt><dd>{twConfig ? twConfig.baseUrl : "Not configured"}</dd></div>
+              <div><dt>Escrow ID</dt><dd>{trustlessWorkReceipt.escrowContractId ? shortHash(trustlessWorkReceipt.escrowContractId) : "Not created"}</dd></div>
+              <div><dt>Total amount</dt><dd>{selectedProposal ? `${selectedProposal.data.totalAmount.toLocaleString()} USDC` : "Not selected"}</dd></div>
+              <div><dt>Creation tx</dt><dd>{trustlessWorkReceipt.deploySubmit?.txHash ? shortHash(trustlessWorkReceipt.deploySubmit.txHash) : "Not submitted"}</dd></div>
+              <div><dt>Funding tx</dt><dd>{trustlessWorkReceipt.fundSubmit?.txHash ? shortHash(trustlessWorkReceipt.fundSubmit.txHash) : "Not funded"}</dd></div>
+              <div><dt>Last refresh</dt><dd>{trustlessWorkReceipt.refreshedAt ? new Date(trustlessWorkReceipt.refreshedAt).toLocaleString() : "Not refreshed"}</dd></div>
+            </dl>
+          </div>
+          <div className="signal-receipt-footer">
+            <div>
+              <p>{mode === "live" ? "The Sub Rosa receipt is generated from a live ReceiptOnly round. The Trustless Work section only shows identifiers and tx hashes actually returned by the API." : "This sample workspace is a UI demonstration. It does not claim on-chain Sub Rosa transactions."}</p>
+              {activeTxHashes.length > 0 && (
+                <div className="signal-tx-list">
+                  {activeTxHashes.map((hash) => (
+                    <a key={hash} href={stellarExpertTxLink(hash)} target="_blank" rel="noreferrer">
+                      <code>{shortHash(hash)}</code>
+                      <ArrowRight size={13} />
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="signal-receipt-actions">
+              {mode === "live" && <button type="button" className="secondary-action compact" onClick={downloadReceipt} disabled={busy !== null || !sdk}><FileCheck2 size={15} />Download verified receipt</button>}
+              <button type="button" className="secondary-action compact" onClick={() => setTrustlessWorkReceipt(emptyReceipt())} disabled={busy !== null}><X size={15} />Clear escrow evidence</button>
+            </div>
+          </div>
+          {trustlessWorkReceipt.escrow?.milestones?.length ? (
+            <div className="pilot-results">
+              {trustlessWorkReceipt.escrow.milestones.map((milestone, index) => (
+                <article className="pilot-result" key={`${milestone.description ?? "milestone"}-${index}`}>
+                  <div className="pilot-result-heading">
+                    <code>Milestone {index + 1}</code>
+                    <span>{milestone.status ?? "pending"}</span>
+                  </div>
+                  <dl>
+                    <div><dt>Description</dt><dd>{milestone.description ?? "Not set"}</dd></div>
+                    <div><dt>Amount</dt><dd>{typeof milestone.amount === "number" ? `${milestone.amount.toLocaleString()} USDC` : "Not set"}</dd></div>
+                    <div><dt>Receiver</dt><dd>{milestone.receiver ? shortAddr(milestone.receiver) : "Not set"}</dd></div>
+                    <div><dt>Flags</dt><dd>{milestone.flags ? Object.entries(milestone.flags).filter(([, value]) => value).map(([key]) => key).join(", ") || "None" : "None"}</dd></div>
+                  </dl>
+                </article>
+              ))}
+            </div>
+          ) : selectedProposal ? (
+            <div className="pilot-results">
+              {selectedProposal.data.milestones.map((milestone, index) => (
+                <article className="pilot-result" key={`${selectedProposal.id}-${index}`}>
+                  <div className="pilot-result-heading">
+                    <code>Preview {index + 1}</code>
+                    <span>planned</span>
+                  </div>
+                  <dl>
+                    <div><dt>Description</dt><dd>{milestone.description}</dd></div>
+                    <div><dt>Amount</dt><dd>{usdc(milestone.amount)} USDC</dd></div>
+                    <div><dt>Receiver</dt><dd>{shortAddr(milestone.receiver)}</dd></div>
+                    <div><dt>Delivery</dt><dd>{milestone.delivery}</dd></div>
+                  </dl>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          <div className="signal-private-state" style={{ margin: "0 20px 20px" }}>
+            <Sparkles size={18} />
+            <div>
+              <strong>{"Sub Rosa Round -> Selected proposal -> Trustless Work escrow"}</strong>
+              <p>{trustlessWorkReceipt.escrowContractId ? "The bridge is live on testnet." : "The preview is ready once a proposal is selected and the Trustless Work API key is configured."}</p>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  );
+}
+
+function UnlockIcon() {
+  return <LockKeyhole size={16} />;
+}

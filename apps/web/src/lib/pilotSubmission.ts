@@ -1,4 +1,4 @@
-import { decodeSealedProposal } from "@sub-rosa/sdk";
+import { decodeSealedProposal, type SealedProposalMilestone } from "@sub-rosa/sdk";
 import { decodePayloadEnvelope } from "@sub-rosa/tlock";
 
 export interface PilotSubmissionView {
@@ -6,6 +6,11 @@ export interface PilotSubmissionView {
   amount: string | null;
   timelineDays: number | null;
   approach: string | null;
+  totalAmount?: number;
+  currency?: string;
+  deliverables?: string[];
+  milestones?: SealedProposalMilestone[];
+  metadata?: Record<string, string>;
   payload: string | null;
   valid: boolean;
 }
@@ -25,6 +30,19 @@ export function decodePilotSubmission(
       amount: envelope.amount?.toString() ?? null,
       timelineDays: proposal.timelineDays,
       approach: proposal.approach,
+      ...(proposal.totalAmount === undefined
+        ? {}
+        : { totalAmount: proposal.totalAmount }),
+      ...(proposal.currency === undefined ? {} : { currency: proposal.currency }),
+      ...(proposal.deliverables === undefined
+        ? {}
+        : { deliverables: proposal.deliverables }),
+      ...(proposal.milestones === undefined
+        ? {}
+        : { milestones: proposal.milestones }),
+      ...(proposal.metadata === undefined
+        ? {}
+        : { metadata: proposal.metadata }),
       payload: null,
       valid,
     };

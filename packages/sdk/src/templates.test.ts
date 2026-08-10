@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { describe, it } from "node:test";
+import { StrKey } from "@stellar/stellar-sdk";
 
 import {
   ASSET_AUCTION_SCHEMA_REF,
@@ -71,6 +73,71 @@ describe("Core v2 partner templates", () => {
     });
   });
 
+  it("encodes and decodes proposal milestones with a matching total", () => {
+    const milestoneReceiver = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7));
+    const payload = encodeSealedProposal({
+      timelineDays: 21,
+      approach: "Discovery, delivery, and audit handoff",
+      totalAmount: 1500,
+      currency: "USDC",
+      deliverables: ["Dashboard UX", "Stellar data sync", "Security review"],
+      milestones: [
+        {
+          title: "UI",
+          description: "Dashboard implementation",
+          amount: 400,
+          receiver: milestoneReceiver,
+          delivery: "2026-09-01",
+        },
+        {
+          title: "Integration",
+          description: "Stellar analytics plumbing",
+          amount: 700,
+          receiver: milestoneReceiver,
+          delivery: "2026-09-10",
+        },
+        {
+          title: "Review",
+          description: "Security and final handoff",
+          amount: 400,
+          receiver: milestoneReceiver,
+          delivery: "2026-09-15",
+        },
+      ],
+    });
+
+    assert.deepEqual(decodeSealedProposal(payload), {
+      timelineDays: 21,
+      approach: "Discovery, delivery, and audit handoff",
+      totalAmount: 1500,
+      currency: "USDC",
+      deliverables: ["Dashboard UX", "Stellar data sync", "Security review"],
+      milestones: [
+        {
+          title: "UI",
+          description: "Dashboard implementation",
+          amount: 400,
+          receiver: milestoneReceiver,
+          delivery: "2026-09-01",
+        },
+        {
+          title: "Integration",
+          description: "Stellar analytics plumbing",
+          amount: 700,
+          receiver: milestoneReceiver,
+          delivery: "2026-09-10",
+        },
+        {
+          title: "Review",
+          description: "Security and final handoff",
+          amount: 400,
+          receiver: milestoneReceiver,
+          delivery: "2026-09-15",
+        },
+      ],
+    });
+  });
+
   it("rejects invalid proposal fields", () => {
     assert.throws(
       () => encodeSealedProposal({ timelineDays: 0, approach: "valid" }),
@@ -83,6 +150,18 @@ describe("Core v2 partner templates", () => {
     assert.throws(
       () => decodeSealedProposal(new TextEncoder().encode('{"version":2}')),
       /unsupported proposal version/,
+    );
+    assert.throws(
+      () =>
+        encodeSealedProposal({
+          timelineDays: 14,
+          approach: "valid",
+          totalAmount: 10,
+          milestones: [
+            { title: "One", amount: 4, receiver: StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7)) },
+          ],
+        }),
+      /sum\(milestone amounts\)/,
     );
   });
 });

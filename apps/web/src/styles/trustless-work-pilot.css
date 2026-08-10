@@ -1,0 +1,50 @@
+.trustless-work-pilot-page {
+  min-height: 100vh;
+  padding-bottom: 52px;
+  background:
+    linear-gradient(180deg, rgba(51, 173, 156, 0.1), transparent 360px),
+    var(--bg-0);
+}
+
+.trustless-work-pilot-milestones {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.trustless-work-pilot-milestone {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: rgba(18, 23, 31, 0.66);
+}
+
+.trustless-work-pilot-milestone .pilot-facts {
+  margin: 0;
+}
+
+.trustless-work-pilot-milestone > .secondary-action.compact {
+  justify-self: start;
+}
+
+@media (max-width: 760px) {
+  .trustless-work-pilot-page .signal-pilot-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .trustless-work-pilot-page .signal-pilot-flow > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .trustless-work-pilot-page .signal-pilot-flow > div:last-child {
+    border-bottom: 0;
+  }
+
+  .trustless-work-pilot-page .signal-pilot-flow > div > svg {
+    display: none;
+  }
+}

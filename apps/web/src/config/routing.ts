@@ -1,7 +1,15 @@
 import type { UseCaseId } from "./useCases";
 import { USE_CASES } from "./useCases";
 
-export type Page = "landing" | "demo" | "architecture" | "dashboard" | "pilot" | "signalPilot" | "docs";
+export type Page =
+  | "landing"
+  | "demo"
+  | "architecture"
+  | "dashboard"
+  | "pilot"
+  | "signalPilot"
+  | "trustlessWorkPilot"
+  | "docs";
 
 export interface RouteState {
   page: Page;
@@ -24,6 +32,9 @@ export function routeFromHash(source = window.location.hash): RouteState {
   if (parts[0] === "pilot") {
     if (parts[1] === "the-signal") {
       return { page: "signalPilot", useCase: "auction" };
+    }
+    if (parts[1] === "trustless-work") {
+      return { page: "trustlessWorkPilot", useCase: "auction" };
     }
     return { page: "pilot", useCase: "auction" };
   }
@@ -52,6 +63,14 @@ export function hashFor(page: Page, useCase: UseCaseId = "auction"): string {
   if (page === "dashboard") return "#/dashboard";
   if (page === "pilot") return "#/pilot";
   if (page === "signalPilot") return "#/pilot/the-signal";
+  if (page === "trustlessWorkPilot") return "#/pilot/trustless-work";
   if (page === "docs") return "#/docs";
   return `#/demo/${useCase}`;
+}
+
+export function trustlessWorkPilotRoundIdFromHash(source = window.location.hash): string {
+  const parts = source.replace(/^#\/?/, "").split("/").filter(Boolean);
+  return parts[0] === "pilot" && parts[1] === "trustless-work" && /^\d+$/.test(parts[2] ?? "")
+    ? parts[2]
+    : "";
 }
