@@ -856,19 +856,15 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       const revealAt = Number(info.genesis_time) + Number(info.period) * revealRound;
       const auditor = generateAuditorKeypair();
       const itemRef = await sha256Bytes(`${project.title}:${address}:${nowMs()}`);
-      const tx = await contract.create_partner_round_v2({
+      const tx = await contract.create_round_v2({
         operator: address,
         item_ref: Buffer.from(itemRef),
         schema_ref: Buffer.from(SEALED_PROPOSAL_SCHEMA_REF),
-        policy: {
-          settlement: {
-            mode: { tag: "ReceiptOnly", values: undefined },
-            payment_asset: undefined,
-            lot_asset: undefined,
-            lot_amount: 0n,
-          },
-          fixed_escrow: 0n,
-          eligible_participants: [],
+        settlement: {
+          mode: { tag: "ReceiptOnly", values: undefined },
+          payment_asset: undefined,
+          lot_asset: undefined,
+          lot_amount: 0n,
         },
         reveal_round: BigInt(revealRound),
         clearing_rule: { tag: "LowestBid", values: undefined },
@@ -1406,7 +1402,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
               </div>
             )}
             <div className="pilot-actions">
-              <button type="button" className="primary-action" onClick={mode === "live" ? createLiveRound : undefined} disabled={busy !== null || !address}>
+              <button type="button" className="primary-action" onClick={createLiveRound} disabled={busy !== null}>
                 {busy === "create-round" ? "Creating..." : <><FileCheck2 size={16} />Create live round</>}
               </button>
               <button type="button" className="secondary-action" onClick={resetWorkspace} disabled={busy !== null}>
