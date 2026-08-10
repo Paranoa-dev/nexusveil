@@ -80,6 +80,7 @@ type PilotMode = "sample" | "live";
 type PilotRole = "organizer" | "provider";
 type PilotStatus = "collecting" | "ready" | "revealed" | "selected";
 type DeadlinePreset = "2m" | "5m" | "1d";
+type SignableTransaction<T> = { signAndSend: () => Promise<T> };
 
 const STORAGE_KEY = "subrosa-trustless-work-pilot-v1";
 const DEADLINE_OPTIONS: Array<{ value: DeadlinePreset; label: string; seconds: number }> = [
@@ -288,6 +289,25 @@ function isContractResultErr(value: unknown): boolean {
     value &&
     typeof value === "object" &&
     "error" in value,
+  );
+}
+
+function transactionErrorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function isTxBadSeqError(error: unknown): boolean {
+  const message = transactionErrorText(error);
+  return (
+    message.includes("txBadSeq") ||
+    message.includes("tx_bad_seq") ||
+    message.includes("\"value\":-5") ||
+    message.includes("\"value\": -5")
   );
 }
 
@@ -847,6 +867,30 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     setTransactionHashes((current) => Array.from(new Set([...current, hash])));
   }
 
+  async function signAndSendWithSequenceRetry<T>(
+    buildTransaction: () => Promise<SignableTransaction<T>>,
+  ): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const tx = await buildTransaction();
+        return await tx.signAndSend();
+      } catch (error) {
+        lastError = error;
+        if (!isTxBadSeqError(error) || attempt === 2) throw error;
+        toast.push(
+          "info",
+          "Wallet sequence refreshed",
+          "Retrying with the latest Stellar account sequence.",
+        );
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(displayError(lastError));
+  }
+
   async function roundExists(target: bigint): Promise<boolean> {
     if (!reader) return false;
     try {
@@ -1006,7 +1050,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       const revealAt = Number(info.genesis_time) + Number(info.period) * revealRound;
       const auditor = generateAuditorKeypair();
       const itemRef = await sha256Bytes(`${project.title}:${address}:${nowMs()}`);
-      const tx = await contract.create_round_v2({
+      const sent = await signAndSendWithSequenceRetry(() => contract.create_round_v2({
         operator: address,
         item_ref: Buffer.from(itemRef),
         schema_ref: Buffer.from(SEALED_PROPOSAL_SCHEMA_REF),
@@ -1022,8 +1066,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         reveal_deadline: BigInt(revealAt + 300),
         auditor_pubkey: Buffer.from(auditor.publicKey),
         max_participants: 25,
-      });
-      const sent = await tx.signAndSend();
+      }));
       const nextId = sent.result.unwrap().toString();
       const hash = txHashFromResult(sent);
       if (hash) rememberTransaction(hash);
@@ -1177,15 +1220,14 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           },
         },
       });
-      const tx = await contract.commit_v2({
+      const sent = await signAndSendWithSequenceRetry(() => contract.commit_v2({
         round_id: BigInt(liveRoundId),
         bidder: address,
         commitment: Buffer.from(sealed.commitment),
         ciphertext: Buffer.from(sealed.ciphertext),
         escrow: 0n,
         auditor_blob: Buffer.from(sealed.auditorBlob),
-      });
-      const sent = await tx.signAndSend();
+      }));
       const hash = txHashFromResult(sent);
       if (hash) rememberTransaction(hash);
       setRound((current) => (
@@ -1233,8 +1275,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       if (current.status.tag === "Open") {
         const signature = await fetchRoundSignature(drand, Number(current.reveal_round));
         try {
-          const open = await contract.open_reveal_v2({ round_id: rid, drand_signature: Buffer.from(signature) });
-          const sent = await open.signAndSend();
+          const sent = await signAndSendWithSequenceRetry(() => (
+            contract.open_reveal_v2({ round_id: rid, drand_signature: Buffer.from(signature) })
+          ));
           rememberTransaction(txHashFromResult(sent));
         } catch (error) {
           if (!isRevealAlreadyOpen(error)) throw error;
@@ -1250,12 +1293,11 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         if (!seal) throw new Error(`Encrypted offer is unavailable for ${shortAddr(bidder)}`);
         const envelope = await openPayload(new Uint8Array(seal.ciphertext), drand);
         try {
-          const reveal = await contract.reveal_v2({
+          const sent = await signAndSendWithSequenceRetry(() => contract.reveal_v2({
             round_id: rid,
             bidder,
             envelope: Buffer.from(encodePayloadEnvelope(envelope)),
-          });
-          const sent = await reveal.signAndSend();
+          }));
           rememberTransaction(txHashFromResult(sent));
           revealedCount += 1;
         } catch (error) {
