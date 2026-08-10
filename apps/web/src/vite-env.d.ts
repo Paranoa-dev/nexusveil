@@ -11,6 +11,7 @@ interface ImportMetaEnv {
   readonly VITE_ESCROW_TOKEN_LABEL?: string;
   readonly VITE_TRUSTLESS_WORK_API_KEY?: string;
   readonly VITE_TRUSTLESS_WORK_BASE_URL?: string;
+  readonly VITE_TRUSTLESS_WORK_API_VERSION?: "v1" | "v2";
   readonly VITE_TRUSTLESS_WORK_TRUSTLINE_CONTRACT_ID?: string;
   readonly VITE_TRUSTLESS_WORK_TRUSTLINE_SYMBOL?: string;
   readonly VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS?: string;

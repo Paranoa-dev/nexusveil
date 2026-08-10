@@ -68,18 +68,18 @@ starts from a working default.
 
 ## Trustless Work Integration
 
-The web adapter uses the current Trustless Work v2 REST flow:
+The web adapter uses the published Trustless Work v1 testnet REST flow:
 
 | Step | Endpoint |
 | --- | --- |
-| Build multi-release deploy transaction | `POST /escrow/multi-release/v2/deploy` |
-| Submit signed transaction | `POST /stellar/send-transaction` |
-| Build fund transaction | `POST /escrow/multi-release/v2/fund` |
-| Read escrow state | `GET /escrows/{contractId}` |
+| Build multi-release deploy transaction | `POST /deployer/multi-release` |
+| Submit signed transaction | `POST /helper/send-transaction` |
+| Build fund transaction | `POST /escrow/multi-release/fund-escrow` |
+| Read escrow state | `GET /helper/get-escrow-by-contract-ids` |
 
 Deploy and fund endpoints return unsigned XDR. The pilot signs that XDR locally
 with Freighter and submits the signed XDR through Trustless Work's
-`/stellar/send-transaction` endpoint. The UI only displays escrow IDs,
+`/helper/send-transaction` endpoint. The UI only displays escrow IDs,
 contract IDs, and tx hashes returned by Sub Rosa or Trustless Work responses.
 It does not fabricate identifiers.
 
@@ -103,16 +103,20 @@ For local web testing, copy `apps/web/.env.example` to `apps/web/.env.local`
 and set:
 
 ```bash
-VITE_TRUSTLESS_WORK_BASE_URL=https://beta.api.trustlesswork.com
+VITE_TRUSTLESS_WORK_BASE_URL=https://dev.api.trustlesswork.com
+VITE_TRUSTLESS_WORK_API_VERSION=v1
 VITE_TRUSTLESS_WORK_API_KEY=
 VITE_TRUSTLESS_WORK_TRUSTLINE_CONTRACT_ID=CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
 VITE_TRUSTLESS_WORK_TRUSTLINE_SYMBOL=USDC
-VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS=
+VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS=GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
 ```
 
 `VITE_TRUSTLESS_WORK_API_KEY` is required for real Trustless Work requests.
-It must be a Core v2 beta Testnet key for `https://beta.api.trustlesswork.com`;
-Version 1 `dev.api`/`api` keys are not interchangeable with the beta Core API.
+It must be the full API key token for the matching Trustless Work network.
+For this pilot, the default is the v1 testnet API at
+`https://dev.api.trustlesswork.com`.
+For v1 deploys, the trustline uses the USDC issuer address and every milestone
+receiver must be a real testnet wallet with a USDC trustline.
 Trustline values can be edited in the pilot UI before deploy.
 
 The Sub Rosa live path also requires the normal Core v2 web config:

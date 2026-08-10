@@ -65,8 +65,7 @@ import {
   resolveTrustlessWorkConfig,
   sendSignedTransaction,
   trustlessWorkConfigIssues,
-  validateTrustlessWorkDeployPayload,
-  type TrustlessWorkConfig,
+  type TrustlessWorkApiVersion,
   type TrustlessWorkDeployMultiReleasePayload,
   type TrustlessWorkEscrowSnapshot,
   type TrustlessWorkMilestoneInput,
@@ -90,6 +89,7 @@ const DEADLINE_OPTIONS: Array<{ value: DeadlinePreset; label: string; seconds: n
   { value: "1d", label: "1 day", seconds: 24 * 60 * 60 },
 ];
 const TRUSTLESS_WORK_TESTNET_USDC_CONTRACT_ID = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+const TRUSTLESS_WORK_TESTNET_USDC_ISSUER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
 const MAX_NEXT_ROUND_PROBE = 256;
 const REVEAL_GATE_SYNC_ATTEMPTS = 12;
 const REVEAL_GATE_SYNC_DELAY_MS = 1500;
@@ -248,14 +248,33 @@ function resolveTrustlessWorkContractId(value: string | undefined): string {
     : TRUSTLESS_WORK_TESTNET_USDC_CONTRACT_ID;
 }
 
-function resolveTrustlessWorkTrustline(draft: TrustlessWorkDraft): TrustlessWorkTrustlineConfig {
+function resolveTrustlessWorkIssuer(value: string | undefined): string {
+  const address = value?.trim();
+  return address && StrKey.isValidEd25519PublicKey(address)
+    ? address
+    : TRUSTLESS_WORK_TESTNET_USDC_ISSUER;
+}
+
+function resolveTrustlessWorkTrustline(
+  draft: TrustlessWorkDraft,
+  apiVersion: TrustlessWorkApiVersion = "v1",
+): TrustlessWorkTrustlineConfig {
+  const symbol = draft.trustlineSymbol.trim() || "USDC";
+  const address = draft.trustlineAddress.trim();
+  if (apiVersion === "v1") {
+    return {
+      symbol,
+      address: address && StrKey.isValidEd25519PublicKey(address)
+        ? address
+        : TRUSTLESS_WORK_TESTNET_USDC_ISSUER,
+    };
+  }
+
   const contractId = draft.trustlineContractId.trim();
   if (contractId && StrKey.isValidContract(contractId)) {
     return { contractId };
   }
 
-  const symbol = draft.trustlineSymbol.trim();
-  const address = draft.trustlineAddress.trim();
   if (symbol && address && StrKey.isValidEd25519PublicKey(address)) {
     return { symbol, address };
   }
@@ -271,7 +290,10 @@ function trustlineSummary(trustline: TrustlessWorkTrustlineConfig): string {
     return `${label} · ${shortAddr(trustline.contractId)}`;
   }
   if (trustline.symbol && trustline.address) {
-    return `${trustline.symbol} / ${shortWallet(trustline.address)}`;
+    const label = trustline.address === TRUSTLESS_WORK_TESTNET_USDC_ISSUER
+      ? "Testnet USDC issuer"
+      : "Custom issuer";
+    return `${trustline.symbol} / ${label} · ${shortWallet(trustline.address)}`;
   }
   return "Not configured";
 }
@@ -369,7 +391,7 @@ function defaultTrustlessWorkDraft(selectedWallet = sampleWallet(31)): Trustless
     observers: "",
     trustlineContractId: resolveTrustlessWorkContractId(import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_CONTRACT_ID),
     trustlineSymbol: import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_SYMBOL?.trim() || "USDC",
-    trustlineAddress: import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS?.trim() ?? "",
+    trustlineAddress: resolveTrustlessWorkIssuer(import.meta.env.VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS),
     receiverMemo: "",
   };
 }
@@ -686,6 +708,7 @@ function buildTrustlessWorkPayload(
   project: ProjectDraft,
   proposal: ProposalRecord,
   draft: TrustlessWorkDraft,
+  apiVersion: TrustlessWorkApiVersion,
   signer: string,
   engagementId: string,
 ): TrustlessWorkDeployMultiReleasePayload {
@@ -693,10 +716,12 @@ function buildTrustlessWorkPayload(
   const milestones = proposal.data.milestones.map((milestone) => ({
     description: `${milestone.title} - ${milestone.description}`,
     amount: milestone.amount,
-    receiver: milestone.receiver,
+    receiver: apiVersion === "v1" && proposal.source !== "live"
+      ? signer
+      : milestone.receiver,
   }));
 
-  return validateTrustlessWorkDeployPayload({
+  return {
     signer,
     engagementId,
     title: project.title,
@@ -704,11 +729,11 @@ function buildTrustlessWorkPayload(
     roles,
     platformFee: parseIntOrZero(draft.platformFee),
     milestones,
-    trustline: resolveTrustlessWorkTrustline(draft),
+    trustline: resolveTrustlessWorkTrustline(draft, apiVersion),
     ...(draft.receiverMemo.trim()
       ? { receiverMemo: parseIntOrZero(draft.receiverMemo) }
       : {}),
-  });
+  };
 }
 
 function emptyReceipt(): TrustlessWorkReceipt {
@@ -735,6 +760,7 @@ function initialState(): PersistedState {
         ...saved.trustlessWorkDraft,
         trustlineContractId: resolveTrustlessWorkContractId(saved.trustlessWorkDraft.trustlineContractId),
         trustlineSymbol: saved.trustlessWorkDraft.trustlineSymbol.trim() || "USDC",
+        trustlineAddress: resolveTrustlessWorkIssuer(saved.trustlessWorkDraft.trustlineAddress),
       }
     : defaultTrustlessWorkDraft(selectedProposal?.wallet);
   return {
@@ -793,6 +819,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const handoffPanelRef = useRef<HTMLElement | null>(null);
   const twConfig = resolveTrustlessWorkConfig();
   const twConfigIssues = trustlessWorkConfigIssues();
+  const twApiVersion = twConfig?.apiVersion ?? "v1";
+  const isTrustlessWorkV1 = twApiVersion === "v1";
   const liveRoundId = roundId;
   const revealCountdown = useDrandCountdown(round ? Number(round.reveal_round) : 0);
   const selectedProposal = (mode === "live" ? liveProposals : proposals).find((entry) => entry.id === selectedProposalId) ?? null;
@@ -953,7 +981,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     return trustlessWorkPilotRoundIdFromHash(window.location.hash);
   }
 
-  function rememberTransaction(hash: string | null) {
+  function rememberTransaction(hash: string | null | undefined) {
     if (!hash) return;
     setTransactionHashes((current) => Array.from(new Set([...current, hash])));
   }
@@ -1589,7 +1617,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     setBusy("deploy-escrow");
     try {
       const engagementId = roundId ? `sub-rosa-round-${roundId}` : `sub-rosa-sample-${project.title.toLowerCase().replace(/\s+/g, "-")}`;
-      const payload = buildTrustlessWorkPayload(project, selectedProposal, trustlessWorkDraft, address, engagementId);
+      const payload = buildTrustlessWorkPayload(project, selectedProposal, trustlessWorkDraft, twConfig.apiVersion, address, engagementId);
       const build = await buildMultiReleaseEscrow(twConfig, payload);
       const contractIdFromBuild = readContractId(build.contractId);
       const signed = await signTransaction(build.unsignedXdr, {
@@ -1605,7 +1633,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         deployBuild: build,
         deploySubmit: submit,
         escrowContractId,
-        escrow: submit.escrow ?? current?.escrow ?? null,
+        escrow: submit.escrow ?? build.escrow ?? current?.escrow ?? null,
         refreshedAt: nowMs(),
       }));
       rememberTransaction(build.txHash);
@@ -1659,6 +1687,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
         fundBuild: build,
         fundSubmit: submit,
         escrowContractId: submit.contractId ?? current.escrowContractId ?? contractId,
+        escrow: submit.escrow ?? build.escrow ?? current.escrow ?? null,
         refreshedAt: nowMs(),
       }));
       rememberTransaction(build.txHash);
@@ -1740,8 +1769,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
     { label: "Deadline", done: deadlinePassed },
     { label: "Reveal", done: revealed },
     { label: "Select winner", done: Boolean(selectedProposal) },
-    { label: "Create escrow", done: Boolean(trustlessWorkReceipt.deploySubmit?.txHash || trustlessWorkReceipt.escrowContractId) },
-    { label: "Fund escrow", done: Boolean(trustlessWorkReceipt.fundSubmit?.txHash) },
+    { label: "Create escrow", done: Boolean(trustlessWorkReceipt.deploySubmit?.txHash || trustlessWorkReceipt.deploySubmit?.status || trustlessWorkReceipt.escrowContractId) },
+    { label: "Fund escrow", done: Boolean(trustlessWorkReceipt.fundSubmit?.txHash || trustlessWorkReceipt.fundSubmit?.status) },
   ];
 
   function proposalList(): ProposalRecord[] {
@@ -2088,7 +2117,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                 <div><dt>Selected provider</dt><dd>{selectedProposal ? selectedProposal.provider : "Not selected"}</dd></div>
                 <div><dt>Proposal total</dt><dd>{selectedProposal ? `${selectedProposal.data.totalAmount.toLocaleString()} USDC` : "Not set"}</dd></div>
                 <div><dt>Status</dt><dd>{sampleStatusLabel(status)}</dd></div>
-                <div><dt>Trustless Work</dt><dd>{twConfig ? twConfig.baseUrl : "Config missing"}</dd></div>
+                <div><dt>Trustless Work</dt><dd>{twConfig ? `${twConfig.baseUrl} · ${twApiVersion.toUpperCase()}` : "Config missing"}</dd></div>
               </div>
               {selectedProposal && (
                 <>
@@ -2096,7 +2125,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                     <ShieldCheck size={18} />
                     <div>
                       <strong>{"Selected proposal -> Trustless Work preview"}</strong>
-                      <p>The preview below shows the exact fields that will be sent to Trustless Work v2 testnet.</p>
+                      <p>The preview below shows the exact fields that will be sent to Trustless Work {twApiVersion.toUpperCase()} testnet.</p>
                     </div>
                   </div>
                   <div className="pilot-facts">
@@ -2115,7 +2144,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                       <div><dt>Release signer</dt><dd>{shortWallet(trustlessWorkDraft.releaseSigner)}</dd></div>
                       <div><dt>Dispute resolver</dt><dd>{shortWallet(trustlessWorkDraft.disputeResolver)}</dd></div>
                       <div><dt>Admin</dt><dd>{shortWallet(trustlessWorkDraft.admin)}</dd></div>
-                      <div><dt>Trustline</dt><dd>{trustlineSummary(resolveTrustlessWorkTrustline(trustlessWorkDraft))}</dd></div>
+                      <div><dt>Trustline</dt><dd>{trustlineSummary(resolveTrustlessWorkTrustline(trustlessWorkDraft, twApiVersion))}</dd></div>
                     </dl>
                   </div>
                   <div className="trustless-work-action-rail">
@@ -2199,10 +2228,12 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                       <textarea rows={2} value={trustlessWorkDraft.observers} onChange={(event) => updateTrustlessWorkRole("observers", event.target.value)} />
                     </label>
                     <div className="signal-form-grid">
-                      <label>
-                        Trustline contract ID
-                        <input placeholder="Canonical testnet USDC contract" value={trustlessWorkDraft.trustlineContractId} onChange={(event) => updateTrustlessWorkRole("trustlineContractId", event.target.value)} />
-                      </label>
+                      {!isTrustlessWorkV1 && (
+                        <label>
+                          Trustline contract ID
+                          <input placeholder="Canonical testnet USDC contract" value={trustlessWorkDraft.trustlineContractId} onChange={(event) => updateTrustlessWorkRole("trustlineContractId", event.target.value)} />
+                        </label>
+                      )}
                       <label>
                         Trustline symbol
                         <input placeholder="USDC" value={trustlessWorkDraft.trustlineSymbol} onChange={(event) => updateTrustlessWorkRole("trustlineSymbol", event.target.value)} />
@@ -2210,8 +2241,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                     </div>
                     <div className="signal-form-grid">
                       <label>
-                        Trustline address
-                        <input placeholder="G... issuer or asset address" value={trustlessWorkDraft.trustlineAddress} onChange={(event) => updateTrustlessWorkRole("trustlineAddress", event.target.value)} />
+                        {isTrustlessWorkV1 ? "Trustline issuer address" : "Trustline address"}
+                        <input placeholder={isTrustlessWorkV1 ? "USDC issuer G..." : "G... issuer or asset address"} value={trustlessWorkDraft.trustlineAddress} onChange={(event) => updateTrustlessWorkRole("trustlineAddress", event.target.value)} />
                       </label>
                       <label>
                         Receiver memo
@@ -2219,7 +2250,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                       </label>
                     </div>
                     <p className="signal-helper trustless-work-trustline-note">
-                      The contract ID is prefilled with the canonical testnet USDC contract. Leave it alone unless you are testing a custom asset with a valid C... contract address.
+                      {isTrustlessWorkV1
+                        ? "V1 dev API uses symbol + issuer address. Milestone receivers must be real testnet wallets with a USDC trustline."
+                        : "The contract ID is prefilled with the canonical testnet USDC contract. Leave it alone unless you are testing a custom asset with a valid C... contract address."}
                     </p>
                   </div>
                 </>
@@ -2284,11 +2317,11 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
               <div><dt>Selected proposal</dt><dd>{selectedProposal ? selectedProposal.provider : "Not selected"}</dd></div>
             </dl>
             <dl>
-              <div><dt>Trustless Work network</dt><dd>{twConfig ? twConfig.baseUrl : "Not configured"}</dd></div>
+              <div><dt>Trustless Work network</dt><dd>{twConfig ? `${twConfig.baseUrl} · ${twApiVersion.toUpperCase()}` : "Not configured"}</dd></div>
               <div><dt>Escrow ID</dt><dd>{trustlessWorkReceipt.escrowContractId ? shortHash(trustlessWorkReceipt.escrowContractId) : "Not created"}</dd></div>
               <div><dt>Total amount</dt><dd>{selectedProposal ? `${selectedProposal.data.totalAmount.toLocaleString()} USDC` : "Not selected"}</dd></div>
-              <div><dt>Creation tx</dt><dd>{trustlessWorkReceipt.deploySubmit?.txHash ? shortHash(trustlessWorkReceipt.deploySubmit.txHash) : "Not submitted"}</dd></div>
-              <div><dt>Funding tx</dt><dd>{trustlessWorkReceipt.fundSubmit?.txHash ? shortHash(trustlessWorkReceipt.fundSubmit.txHash) : "Not funded"}</dd></div>
+              <div><dt>Creation tx</dt><dd>{trustlessWorkReceipt.deploySubmit?.txHash ? shortHash(trustlessWorkReceipt.deploySubmit.txHash) : trustlessWorkReceipt.deploySubmit?.status ? trustlessWorkReceipt.deploySubmit.status : "Not submitted"}</dd></div>
+              <div><dt>Funding tx</dt><dd>{trustlessWorkReceipt.fundSubmit?.txHash ? shortHash(trustlessWorkReceipt.fundSubmit.txHash) : trustlessWorkReceipt.fundSubmit?.status ? trustlessWorkReceipt.fundSubmit.status : "Not funded"}</dd></div>
               <div><dt>Last refresh</dt><dd>{trustlessWorkReceipt.refreshedAt ? new Date(trustlessWorkReceipt.refreshedAt).toLocaleString() : "Not refreshed"}</dd></div>
             </dl>
           </div>

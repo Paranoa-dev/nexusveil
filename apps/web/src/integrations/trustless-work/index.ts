@@ -3,7 +3,10 @@ import { StrKey } from "@stellar/stellar-sdk";
 export interface TrustlessWorkConfig {
   baseUrl: string;
   apiKey: string;
+  apiVersion: TrustlessWorkApiVersion;
 }
+
+export type TrustlessWorkApiVersion = "v1" | "v2";
 
 export interface TrustlessWorkRoleConfig {
   approvers: string[];
@@ -43,17 +46,23 @@ export interface TrustlessWorkDeployMultiReleasePayload {
 
 export interface TrustlessWorkUnsignedTransactionResponse {
   unsignedXdr: string;
-  txHash: string;
+  unsignedTransaction?: string;
+  txHash?: string | null;
   contractId?: string | null | Record<string, unknown>;
+  escrow?: TrustlessWorkEscrowSnapshot;
+  message?: string;
+  status?: string;
+  [key: string]: unknown;
 }
 
 export interface TrustlessWorkSendTransactionResponse {
-  txHash: string;
-  ledger: number;
+  txHash?: string | null;
+  ledger?: number;
   contractId?: string;
   escrow?: TrustlessWorkEscrowSnapshot;
   code?: "STELLAR_TX_SUBMITTED" | "STELLAR_TX_SUBMITTED_INDEXER_LAGGING";
   message?: string;
+  status?: string;
 }
 
 export interface TrustlessWorkEscrowSnapshot {
@@ -93,8 +102,11 @@ export interface TrustlessWorkErrorDetails {
   type?: string;
   title?: string;
   status?: number;
+  statusCode?: number;
   code?: string;
   detail?: string;
+  message?: string | string[];
+  error?: string;
   traceId?: string;
   instance?: string;
   extensions?: Record<string, unknown>;
@@ -116,7 +128,8 @@ export class TrustlessWorkApiError extends Error {
   }
 }
 
-const DEFAULT_BASE_URL = "https://beta.api.trustlesswork.com";
+const DEFAULT_V1_BASE_URL = "https://dev.api.trustlesswork.com";
+const DEFAULT_V2_BASE_URL = "https://beta.api.trustlesswork.com";
 
 function trimUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
@@ -126,14 +139,27 @@ function normalizeEnvValue(value: string | undefined): string {
   return (value ?? "").trim().replace(/^['"]|['"]$/g, "");
 }
 
+function resolveApiVersion(value: string | undefined, baseUrl: string): TrustlessWorkApiVersion {
+  const normalized = normalizeEnvValue(value).toLowerCase();
+  if (normalized === "2" || normalized === "v2") return "v2";
+  if (normalized === "1" || normalized === "v1") return "v1";
+  return baseUrl.includes("beta.api.trustlesswork.com") ? "v2" : "v1";
+}
+
 export function resolveTrustlessWorkConfig(
   env: Record<string, string | undefined> = import.meta.env,
 ): TrustlessWorkConfig | null {
   const apiKey = normalizeEnvValue(env.VITE_TRUSTLESS_WORK_API_KEY);
   if (!apiKey) return null;
+  const requestedVersion = normalizeEnvValue(env.VITE_TRUSTLESS_WORK_API_VERSION).toLowerCase();
+  const defaultBaseUrl = requestedVersion === "v2" || requestedVersion === "2"
+    ? DEFAULT_V2_BASE_URL
+    : DEFAULT_V1_BASE_URL;
+  const baseUrl = trimUrl(normalizeEnvValue(env.VITE_TRUSTLESS_WORK_BASE_URL) || defaultBaseUrl);
   return {
-    baseUrl: trimUrl(normalizeEnvValue(env.VITE_TRUSTLESS_WORK_BASE_URL) || DEFAULT_BASE_URL),
+    baseUrl,
     apiKey,
+    apiVersion: resolveApiVersion(env.VITE_TRUSTLESS_WORK_API_VERSION, baseUrl),
   };
 }
 
@@ -147,6 +173,16 @@ export function trustlessWorkConfigIssues(
   const baseUrl = normalizeEnvValue(env.VITE_TRUSTLESS_WORK_BASE_URL);
   if (baseUrl && !/^https?:\/\//.test(baseUrl)) {
     issues.push("VITE_TRUSTLESS_WORK_BASE_URL must be a valid URL.");
+  }
+  const apiVersion = normalizeEnvValue(env.VITE_TRUSTLESS_WORK_API_VERSION).toLowerCase();
+  if (apiVersion && !["1", "v1", "2", "v2"].includes(apiVersion)) {
+    issues.push("VITE_TRUSTLESS_WORK_API_VERSION must be v1 or v2.");
+  }
+  if (baseUrl && apiVersion === "v1" && baseUrl.includes("beta.api.trustlesswork.com")) {
+    issues.push("VITE_TRUSTLESS_WORK_API_VERSION=v1 does not match the beta Trustless Work URL. Use https://dev.api.trustlesswork.com for v1.");
+  }
+  if (baseUrl && apiVersion === "v2" && baseUrl.includes("dev.api.trustlesswork.com")) {
+    issues.push("VITE_TRUSTLESS_WORK_API_VERSION=v2 does not match the v1 dev Trustless Work URL. Use https://beta.api.trustlesswork.com for v2.");
   }
   return issues;
 }
@@ -163,7 +199,7 @@ function traceSuffix(error: TrustlessWorkApiError): string {
 
 export function formatTrustlessWorkApiError(
   error: unknown,
-  config?: Pick<TrustlessWorkConfig, "baseUrl">,
+  config?: Partial<Pick<TrustlessWorkConfig, "baseUrl" | "apiVersion">>,
 ): string {
   if (!(error instanceof TrustlessWorkApiError)) {
     return error instanceof Error ? error.message : String(error);
@@ -172,17 +208,24 @@ export function formatTrustlessWorkApiError(
   const detail = error.details?.detail || error.message;
   const location = config?.baseUrl ? ` at ${config.baseUrl}` : "";
   if (error.code === "AUTH_INVALID_CREDENTIAL" || (error.status === 401 && /invalid api key/i.test(detail))) {
-    return `Trustless Work rejected this API key${location}. Use a Core v2 beta Testnet key for beta.api.trustlesswork.com; Version 1/dev/mainnet keys are not interchangeable.${traceSuffix(error)}`;
+    if (config?.apiVersion === "v2" || config?.baseUrl?.includes("beta.api.trustlesswork.com")) {
+      return `Trustless Work rejected this API key${location}. Use a Core v2 beta Testnet key for beta.api.trustlesswork.com; Version 1/dev/mainnet keys are not interchangeable.${traceSuffix(error)}`;
+    }
+    return `Trustless Work rejected this API key${location}. Use the full v1 API key token from the matching Trustless Work network, not only the key ID.${traceSuffix(error)}`;
   }
 
   if (error.code === "AUTH_CREDENTIAL_MISSING") {
-    return `Trustless Work did not receive an API key. Set VITE_TRUSTLESS_WORK_API_KEY to a Core v2 beta Testnet key.${traceSuffix(error)}`;
+    return `Trustless Work did not receive an API key. Set VITE_TRUSTLESS_WORK_API_KEY to the full API key token for ${config?.baseUrl ?? "the configured Trustless Work API"}.${traceSuffix(error)}`;
   }
 
   if (error.code === "AUTH_INSUFFICIENT_ROLE") {
     const required = listExtension(error.details?.extensions?.requiredAnyOf);
     const present = listExtension(error.details?.extensions?.present);
     return `Trustless Work accepted the key, but the key is missing the required role${required ? `: ${required}` : ""}.${present ? ` Present roles: ${present}.` : ""}${traceSuffix(error)}`;
+  }
+
+  if (/trustline|asset trust|required asset|receiver/i.test(detail) && /could not be validated|does not have|missing|required/i.test(detail)) {
+    return `Trustless Work accepted the key, but a wallet in the escrow does not satisfy the selected asset trustline. For v1 testnet, every milestone receiver must be a real funded testnet wallet with a USDC trustline. Original error: ${detail}${traceSuffix(error)}`;
   }
 
   return `${error.code ? `${error.code}: ` : ""}${detail}${traceSuffix(error)}`;
@@ -348,11 +391,23 @@ export interface TrustlessWorkRequestOptions {
   body?: unknown;
 }
 
+function detailsMessage(value: TrustlessWorkErrorDetails["message"]): string {
+  if (Array.isArray(value)) return value.filter(Boolean).join("; ");
+  return typeof value === "string" ? value : "";
+}
+
 async function parseError(response: Response): Promise<TrustlessWorkApiError> {
   let details: TrustlessWorkErrorDetails = { status: response.status };
   try {
     const parsed = (await response.clone().json()) as Partial<TrustlessWorkErrorDetails>;
-    details = { ...details, ...parsed };
+    const message = detailsMessage(parsed.message);
+    details = {
+      ...details,
+      ...parsed,
+      status: response.status,
+      ...(message && !parsed.detail ? { detail: message } : {}),
+      ...(parsed.error && !parsed.title ? { title: parsed.error } : {}),
+    };
   } catch {
     const text = await response.clone().text();
     details = {
@@ -361,7 +416,7 @@ async function parseError(response: Response): Promise<TrustlessWorkApiError> {
       detail: text || undefined,
     };
   }
-  const message = details.detail || details.title || "Trustless Work request failed";
+  const message = details.detail || detailsMessage(details.message) || details.title || "Trustless Work request failed";
   return new TrustlessWorkApiError(message, details as TrustlessWorkErrorDetails & { status: number });
 }
 
@@ -385,29 +440,153 @@ export async function trustlessWorkRequest<T>(
     throw await parseError(response);
   }
 
-  return (await response.json()) as T;
+  const text = await response.text();
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return { message: text } as T;
+  }
 }
 
 export function readContractId(value: unknown): string | null {
   if (typeof value === "string" && value.trim()) return value.trim();
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  for (const key of ["contractId", "address", "value", "id"]) {
+  for (const key of ["contractId", "contract_id", "address", "value", "id"]) {
     const candidate = record[key];
     if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
   }
   return null;
 }
 
+function normalizeUnsignedTransactionResponse(
+  response: TrustlessWorkUnsignedTransactionResponse,
+): TrustlessWorkUnsignedTransactionResponse {
+  const unsignedXdr = response.unsignedXdr || response.unsignedTransaction;
+  if (!unsignedXdr?.trim()) {
+    throw new Error("Trustless Work did not return an unsigned transaction XDR.");
+  }
+  return {
+    ...response,
+    unsignedXdr,
+  };
+}
+
+function normalizeSendTransactionResponse(
+  response: TrustlessWorkSendTransactionResponse & { hash?: string },
+): TrustlessWorkSendTransactionResponse {
+  return {
+    ...response,
+    txHash: response.txHash ?? response.hash ?? null,
+  };
+}
+
+function normalizeGetEscrowResponse(response: unknown): TrustlessWorkGetEscrowResponse {
+  if (response && typeof response === "object" && "escrow" in response) {
+    const record = response as Partial<TrustlessWorkGetEscrowResponse>;
+    return {
+      escrow: record.escrow ?? {},
+      events: record.events ?? [],
+      eventsHasMore: record.eventsHasMore ?? false,
+      deposits: record.deposits ?? [],
+    };
+  }
+
+  const record = response && typeof response === "object"
+    ? response as Record<string, unknown>
+    : {};
+  const entries = Array.isArray(response)
+    ? response
+    : Array.isArray(record.data)
+      ? record.data
+      : Array.isArray(record.escrows)
+        ? record.escrows
+        : [];
+  const escrow = entries[0] ?? record;
+  if (!escrow || typeof escrow !== "object") {
+    throw new Error("Trustless Work did not return escrow data for this contract ID.");
+  }
+  return {
+    escrow: escrow as TrustlessWorkEscrowSnapshot,
+    events: [],
+    eventsHasMore: false,
+    deposits: [],
+  };
+}
+
+function firstRole(values: string[], label: string): string {
+  if (!values.length) throw new Error(`${label} is required`);
+  return stellarKey(values[0], label);
+}
+
+function validateTrustlessWorkTrustlineV1(
+  trustline: TrustlessWorkTrustlineConfig,
+): Required<Pick<TrustlessWorkTrustlineConfig, "symbol" | "address">> {
+  const symbol = trustline.symbol?.trim();
+  const address = trustline.address?.trim();
+  if (!symbol || !address) {
+    throw new Error("Trustless Work v1 requires trustline symbol + issuer address.");
+  }
+  return {
+    symbol,
+    address: stellarKey(address, "trustline.address"),
+  };
+}
+
+function toTrustlessWorkV1DeployPayload(
+  payload: TrustlessWorkDeployMultiReleasePayload,
+): Record<string, unknown> {
+  const signer = stellarKey(payload.signer, "signer");
+  const roles = {
+    approver: firstRole(payload.roles.approvers, "roles.approvers[0]"),
+    serviceProvider: firstRole(payload.roles.serviceProviders, "roles.serviceProviders[0]"),
+    platformAddress: stellarKey(payload.roles.platform, "roles.platform"),
+    releaseSigner: firstRole(payload.roles.releaseSigners, "roles.releaseSigners[0]"),
+    disputeResolver: firstRole(payload.roles.disputeResolvers, "roles.disputeResolvers[0]"),
+  };
+  const trustline = validateTrustlessWorkTrustlineV1(payload.trustline);
+  const milestones = validateTrustlessWorkMilestones(payload.milestones ?? []).map((milestone) => ({
+    description: milestone.description,
+    amount: milestone.amount,
+    receiver: milestone.receiver,
+  }));
+  const platformFee = Number.isFinite(payload.platformFee) && payload.platformFee >= 0
+    ? payload.platformFee
+    : (() => {
+        throw new Error("platformFee must be a non-negative number");
+      })();
+  if (!payload.engagementId.trim()) throw new Error("engagementId must not be empty");
+  if (!payload.title.trim()) throw new Error("title must not be empty");
+  if (!payload.description.trim()) throw new Error("description must not be empty");
+
+  return {
+    signer,
+    engagementId: payload.engagementId.trim(),
+    title: payload.title.trim(),
+    description: payload.description.trim(),
+    roles,
+    platformFee,
+    milestones,
+    trustline,
+  };
+}
+
 export async function buildMultiReleaseEscrow(
   config: TrustlessWorkConfig,
   payload: TrustlessWorkDeployMultiReleasePayload,
 ): Promise<TrustlessWorkUnsignedTransactionResponse> {
-  return trustlessWorkRequest<TrustlessWorkUnsignedTransactionResponse>(
+  const response = await trustlessWorkRequest<TrustlessWorkUnsignedTransactionResponse>(
     config,
-    "/escrow/multi-release/v2/deploy",
-    { method: "POST", body: validateTrustlessWorkDeployPayload(payload) },
+    config.apiVersion === "v1" ? "/deployer/multi-release" : "/escrow/multi-release/v2/deploy",
+    {
+      method: "POST",
+      body: config.apiVersion === "v1"
+        ? toTrustlessWorkV1DeployPayload(payload)
+        : validateTrustlessWorkDeployPayload(payload),
+    },
   );
+  return normalizeUnsignedTransactionResponse(response);
 }
 
 export async function fundMultiReleaseEscrow(
@@ -417,9 +596,9 @@ export async function fundMultiReleaseEscrow(
   if (!payload.contractId.trim()) throw new Error("contractId must not be empty");
   stellarKey(payload.signer, "signer");
   positiveNumber(payload.amount, "amount");
-  return trustlessWorkRequest<TrustlessWorkUnsignedTransactionResponse>(
+  const response = await trustlessWorkRequest<TrustlessWorkUnsignedTransactionResponse>(
     config,
-    "/escrow/multi-release/v2/fund",
+    config.apiVersion === "v1" ? "/escrow/multi-release/fund-escrow" : "/escrow/multi-release/v2/fund",
     {
       method: "POST",
       body: {
@@ -429,6 +608,7 @@ export async function fundMultiReleaseEscrow(
       },
     },
   );
+  return normalizeUnsignedTransactionResponse(response);
 }
 
 export async function sendSignedTransaction(
@@ -436,11 +616,12 @@ export async function sendSignedTransaction(
   signedXdr: string,
 ): Promise<TrustlessWorkSendTransactionResponse> {
   if (!signedXdr.trim()) throw new Error("signedXdr must not be empty");
-  return trustlessWorkRequest<TrustlessWorkSendTransactionResponse>(
+  const response = await trustlessWorkRequest<TrustlessWorkSendTransactionResponse & { hash?: string }>(
     config,
-    "/stellar/send-transaction",
+    config.apiVersion === "v1" ? "/helper/send-transaction" : "/stellar/send-transaction",
     { method: "POST", body: { signedXdr } },
   );
+  return normalizeSendTransactionResponse(response);
 }
 
 export async function getEscrowByContractId(
@@ -448,8 +629,18 @@ export async function getEscrowByContractId(
   contractId: string,
 ): Promise<TrustlessWorkGetEscrowResponse> {
   if (!contractId.trim()) throw new Error("contractId must not be empty");
-  return trustlessWorkRequest<TrustlessWorkGetEscrowResponse>(
+  if (config.apiVersion === "v1") {
+    const params = new URLSearchParams();
+    params.append("contractIds[]", contractId.trim());
+    const response = await trustlessWorkRequest<unknown>(
+      config,
+      `/helper/get-escrow-by-contract-ids?${params.toString()}`,
+    );
+    return normalizeGetEscrowResponse(response);
+  }
+
+  return normalizeGetEscrowResponse(await trustlessWorkRequest<TrustlessWorkGetEscrowResponse>(
     config,
     `/escrows/${contractId.trim()}`,
-  );
+  ));
 }

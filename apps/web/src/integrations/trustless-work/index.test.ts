@@ -126,6 +126,19 @@ test("reports missing Trustless Work config without guessing values", () => {
   assert.equal(readContractId({ contractId: "C123" }), "C123");
 });
 
+test("defaults Trustless Work config to v1 dev when no base URL is set", () => {
+  assert.deepEqual(
+    resolveTrustlessWorkConfig({
+      VITE_TRUSTLESS_WORK_API_KEY: "id.secret",
+    }),
+    {
+      baseUrl: "https://dev.api.trustlesswork.com",
+      apiKey: "id.secret",
+      apiVersion: "v1",
+    },
+  );
+});
+
 test("normalizes Trustless Work env values", () => {
   assert.deepEqual(
     resolveTrustlessWorkConfig({
@@ -135,6 +148,7 @@ test("normalizes Trustless Work env values", () => {
     {
       baseUrl: "https://beta.api.trustlesswork.com",
       apiKey: "id.secret",
+      apiVersion: "v2",
     },
   );
 });
@@ -154,4 +168,31 @@ test("explains beta Core API key mismatch clearly", () => {
   assert.match(message, /Core v2 beta Testnet key/);
   assert.match(message, /Version 1\/dev\/mainnet keys/);
   assert.match(message, /trace-123/);
+});
+
+test("explains v1 credential mismatch without mentioning beta keys", () => {
+  const message = formatTrustlessWorkApiError(
+    new TrustlessWorkApiError("Invalid API key", {
+      status: 401,
+      title: "Unauthorized",
+      code: "AUTH_INVALID_CREDENTIAL",
+      detail: "Invalid API key",
+      traceId: "trace-456",
+    }),
+    { baseUrl: "https://dev.api.trustlesswork.com", apiVersion: "v1" },
+  );
+
+  assert.match(message, /full v1 API key token/);
+  assert.doesNotMatch(message, /Core v2 beta Testnet key/);
+  assert.match(message, /trace-456/);
+});
+
+test("flags beta and v1 URL mismatches", () => {
+  assert.ok(
+    trustlessWorkConfigIssues({
+      VITE_TRUSTLESS_WORK_BASE_URL: "https://beta.api.trustlesswork.com",
+      VITE_TRUSTLESS_WORK_API_VERSION: "v1",
+      VITE_TRUSTLESS_WORK_API_KEY: "id.secret",
+    }).some((issue) => issue.includes("does not match the beta Trustless Work URL")),
+  );
 });
