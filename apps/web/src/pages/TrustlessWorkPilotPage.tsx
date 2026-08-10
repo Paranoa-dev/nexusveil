@@ -27,6 +27,7 @@ import {
   CheckCircle2,
   FileCheck2,
   Clock3,
+  ExternalLink,
   LockKeyhole,
   RefreshCw,
   ShieldCheck,
@@ -222,7 +223,7 @@ function defaultProject(): ProjectDraft {
     title: "Build a Stellar merchant analytics dashboard",
     description:
       "Private selection workflow for a small analytics build with a visible reveal, then a Trustless Work multi-release escrow.",
-    budget: "2000",
+    budget: "20",
     deadlinePreset: "5m",
   };
 }
@@ -232,15 +233,15 @@ function defaultProposalDraft(): ProposalDraft {
     providerName: "Northstar Studio",
     providerMeta: "Product engineering",
     providerWallet: sampleWallet(30),
-    totalAmount: "1500",
+    totalAmount: "10",
     timelineDays: "21",
     approach: "Discovery, dashboard delivery, and security handoff.",
     team: "4 engineers + 1 auditor",
     deliverables: "Dashboard UX\nStellar data integration\nSecurity review",
     milestones: [
-      makeMilestone(1, "UI / dashboard implementation", 400, sampleWallet(31), "2026-09-01"),
-      makeMilestone(2, "Stellar data integration", 700, sampleWallet(31), "2026-09-10"),
-      makeMilestone(3, "Security / final review", 400, sampleWallet(32), "2026-09-15"),
+      makeMilestone(1, "UI / dashboard implementation", 3, sampleWallet(31), "2026-09-01"),
+      makeMilestone(2, "Stellar data integration", 4, sampleWallet(31), "2026-09-10"),
+      makeMilestone(3, "Security / final review", 3, sampleWallet(32), "2026-09-15"),
     ],
   };
 }
@@ -2331,6 +2332,9 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
                         Refresh escrow
                       </button>
                     </div>
+                    <p className="signal-helper trustless-work-trustline-note">
+                      Funding needs {selectedProposal.data.totalAmount.toLocaleString()} USDC in the connected organizer wallet. A trustline only allows the wallet to hold USDC; it does not add a USDC balance. Testnet USDC is available from the <a href="https://faucet.circle.com" target="_blank" rel="noreferrer">Circle faucet <ExternalLink size={13} /></a> after selecting Stellar.
+                    </p>
                   </div>
                   <div className="pilot-panel-heading trustless-work-advanced-heading">
                     <span>Milestones</span>
