@@ -23,7 +23,6 @@ export interface TrustlessWorkTrustlineConfig {
   contractId?: string;
   symbol?: string;
   address?: string;
-  decimals?: number;
 }
 
 export interface TrustlessWorkMilestoneInput {
@@ -649,18 +648,18 @@ function firstRole(values: string[], label: string): string {
 
 function validateTrustlessWorkTrustlineV1(
   trustline: TrustlessWorkTrustlineConfig,
-): { address: string; decimals: number } {
-  const address = trustline.contractId?.trim() || trustline.address?.trim();
-  if (!address || !StrKey.isValidContract(address)) {
-    throw new Error("Trustless Work v1 requires the USDC trustline contract address (C...).");
+): Required<Pick<TrustlessWorkTrustlineConfig, "symbol" | "address">> {
+  const symbol = trustline.symbol?.trim();
+  const address = trustline.address?.trim();
+  if (!symbol || !address) {
+    throw new Error("Trustless Work v1 requires trustline symbol + issuer address.");
   }
-  const decimals = trustline.decimals ?? 10_000_000;
-  if (!Number.isInteger(decimals) || decimals <= 0) {
-    throw new Error("Trustless Work v1 trustline decimals must be a positive integer.");
+  if (!StrKey.isValidEd25519PublicKey(address)) {
+    throw new Error("Trustless Work v1 trustline issuer must be a valid Stellar public key.");
   }
   return {
-    address,
-    decimals,
+    symbol,
+    address: stellarKey(address, "trustline.address"),
   };
 }
 
