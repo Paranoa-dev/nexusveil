@@ -736,9 +736,10 @@ function buildTrustlessWorkPayload(
 ): TrustlessWorkDeployMultiReleasePayload {
   let roles = trustlessWorkRolesFromDraft(draft, proposal);
   if (apiVersion === "v1") {
-    const serviceProvider = proposal.source === "live"
-      ? roles.serviceProviders[0]?.trim() || proposal.wallet
-      : signer;
+    const fallbackWallet = proposal.source === "live" ? proposal.wallet : signer;
+    const serviceProvider = isPilotSampleWallet(roles.serviceProviders[0])
+      ? fallbackWallet
+      : roles.serviceProviders[0]?.trim() || fallbackWallet;
     roles = {
       approvers: [trustlessWorkV1RoleAddress(roles.approvers[0], signer)],
       serviceProviders: [serviceProvider],
@@ -752,8 +753,8 @@ function buildTrustlessWorkPayload(
   const milestones = proposal.data.milestones.map((milestone) => ({
     description: `${milestone.title} - ${milestone.description}`,
     amount: milestone.amount,
-    receiver: apiVersion === "v1" && proposal.source !== "live"
-      ? signer
+    receiver: apiVersion === "v1" && isPilotSampleWallet(milestone.receiver)
+      ? (proposal.source === "live" ? proposal.wallet : signer)
       : milestone.receiver,
   }));
 
