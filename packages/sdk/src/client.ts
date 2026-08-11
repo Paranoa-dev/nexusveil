@@ -200,6 +200,14 @@ const toBigInt = (v: number | bigint): bigint =>
 
 const toBuffer = (b: Uint8Array): Buffer => Buffer.from(b);
 
+function isMissingContractFunction(error: unknown, functionName: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes(functionName) &&
+    message.includes("trying to invoke non-existent contract function")
+  );
+}
+
 function v2RoundArgs(
   params: CreateRoundV2Params,
   operator: string,
@@ -955,12 +963,19 @@ export class SubRosaClient {
   async getRoundPolicyV2(
     roundId: number | bigint,
   ): Promise<RoundPolicyV2 | undefined> {
-    const tx = await this.#validatedContractCall(() =>
-      this.contract.get_round_policy_v2({
-        round_id: normalizeRoundId(roundId),
-      }),
-    );
-    return tx.result ?? undefined;
+    try {
+      const tx = await this.#validatedContractCall(() =>
+        this.contract.get_round_policy_v2({
+          round_id: normalizeRoundId(roundId),
+        }),
+      );
+      return tx.result ?? undefined;
+    } catch (error) {
+      if (isMissingContractFunction(error, "get_round_policy_v2")) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   async getBidState(

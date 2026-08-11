@@ -35,7 +35,7 @@ The project is licensed under [MIT](./LICENSE).
 | Core v2 testnet | Active, with settled `ReceiptOnly` and atomic auction proofs |
 | Core v2 mainnet | Official deployment active at the contract linked above |
 | Public SDK | `@sub-rosa/sdk`, named `testnet` and `mainnet` presets |
-| Hosted pilot | Standalone The Signal-style OTC and loan deal flow |
+| Hosted pilots | Standalone ReceiptOnly workflows for deal flow, milestone escrow handoff, and optional marketplace proposals |
 | Production boundary | Independent funds-handling review still required before uncapped value |
 
 Core v2 uses the same versioned payload envelope, Drand reveal gate,
@@ -115,6 +115,22 @@ database, production-code change, or escrow integration:
 This is a named early-pilot and validation workflow, not a claim of production
 integration with The Signal. It is intentionally useful as a linkable demo
 while leaving settlement and business selection to the partner application.
+
+## Sealed-proposal pilot
+
+Local route: `#/pilot/offer-hub`
+
+This standalone workspace demonstrates the validated marketplace fit: a client
+posts a job, optionally enables sealed proposals, several freelancers submit
+privately, proposals reveal together, and the client selects a provider
+manually. Live mode uses the existing Core v2 `ReceiptOnly` lifecycle; sample
+mode is clearly separated local data.
+
+Offer-Hub keeps marketplace discovery, profiles, subscriptions, eligibility,
+selection, and payment. Sub Rosa supplies only private proposal submission,
+deadline reveal, and receipt evidence. This is a pilot workflow, not a claim
+that Offer-Hub has deployed a production integration. See
+[the pilot boundary and setup guide](./docs/pilots/OFFER_HUB_PILOT.md).
 
 ## Ecosystem validation
 

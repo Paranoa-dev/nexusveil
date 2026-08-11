@@ -1,0 +1,266 @@
+.offer-hub-pilot-page {
+  background:
+    linear-gradient(180deg, rgba(38, 169, 145, 0.07), transparent 300px),
+    var(--bg-0);
+}
+
+.offer-hub-hero {
+  align-items: flex-start;
+}
+
+.offer-hub-hero > div:first-child {
+  max-width: 780px;
+}
+
+.offer-hub-hero p {
+  max-width: 740px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.pilot-boundary {
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid rgba(38, 169, 145, 0.35);
+  border-radius: 6px;
+  color: #9edbca;
+  background: rgba(38, 169, 145, 0.08);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.offer-hub-flow {
+  width: min(1480px, calc(100% - 48px));
+}
+
+.offer-hub-layout {
+  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 0.8fr);
+}
+
+.offer-hub-primary,
+.offer-hub-sidebar,
+.offer-hub-main,
+.offer-hub-proposal-card {
+  min-width: 0;
+}
+
+.offer-hub-sidebar .pilot-results-panel {
+  border-bottom: 1px solid var(--line-1);
+}
+
+.offer-hub-sidebar .pilot-results,
+.offer-hub-main {
+  padding: 0 20px;
+}
+
+.offer-hub-main > .pilot-result + .pilot-result {
+  border-top: 0;
+}
+
+.offer-hub-job-facts dd,
+.offer-hub-proposal-facts dd {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.offer-hub-muted-note,
+.offer-hub-demo-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.offer-hub-muted-note {
+  padding: 0 18px 18px;
+}
+
+.offer-hub-card-actions {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.offer-hub-room-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.offer-hub-room-note svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #9edbca;
+}
+
+.offer-hub-proposal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.offer-hub-proposal-card {
+  padding: 16px;
+  border: 1px solid var(--line-1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.offer-hub-proposal-card.selected {
+  border-color: rgba(38, 169, 145, 0.6);
+  box-shadow: 0 0 0 1px rgba(38, 169, 145, 0.15) inset;
+}
+
+.offer-hub-pilot-page .pilot-status.revealed,
+.offer-hub-pilot-page .pilot-status.selected {
+  border-color: rgba(38, 169, 145, 0.5);
+  color: #9edbca;
+  background: rgba(38, 169, 145, 0.08);
+}
+
+.offer-hub-pilot-page .pilot-status.deadline,
+.offer-hub-pilot-page .pilot-status.sealed {
+  border-color: rgba(226, 185, 95, 0.45);
+  color: #e4c477;
+}
+
+.offer-hub-proposal-card .pilot-facts {
+  padding: 0;
+}
+
+.offer-hub-proposal-card .pilot-actions {
+  margin-top: 14px;
+  padding-bottom: 0;
+}
+
+.offer-hub-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 0 18px;
+}
+
+.offer-hub-form label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.offer-hub-form input,
+.offer-hub-form select,
+.offer-hub-form textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  outline: 0;
+  color: var(--ink);
+  background: var(--bg-2);
+}
+
+.offer-hub-form input,
+.offer-hub-form select {
+  min-height: 42px;
+  padding: 0 11px;
+}
+
+.offer-hub-form textarea {
+  min-height: 92px;
+  padding: 10px 11px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.offer-hub-form label:has(textarea),
+.offer-hub-form .offer-hub-card-actions {
+  grid-column: 1 / -1;
+}
+
+.offer-hub-form .offer-hub-checkbox {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--ink-2);
+  background: var(--bg-2);
+}
+
+.offer-hub-form .offer-hub-checkbox input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+}
+
+.offer-hub-evidence {
+  padding: 0;
+}
+
+.offer-hub-boundary-panel {
+  padding: 20px;
+}
+
+.offer-hub-boundary-panel .pilot-facts {
+  padding: 0;
+}
+
+.offer-hub-tx-panel {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: rgba(18, 23, 31, 0.78);
+}
+
+.offer-hub-advanced-heading {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.offer-hub-advanced-heading svg {
+  color: #9edbca;
+}
+
+@media (max-width: 1080px) {
+  .offer-hub-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .offer-hub-proposal-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .offer-hub-flow {
+    width: calc(100% - 32px);
+  }
+
+  .offer-hub-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .offer-hub-form label:has(textarea),
+  .offer-hub-form .offer-hub-card-actions {
+    grid-column: auto;
+  }
+
+  .offer-hub-sidebar .pilot-results,
+  .offer-hub-main {
+    padding: 0 16px;
+  }
+}

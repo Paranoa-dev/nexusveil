@@ -32,6 +32,10 @@ Minimum flow:
 This track validates the SDK, hosted flow, and proposal UX. It does not count as
 economic settlement evidence.
 
+The [Offer-Hub pilot workflow](./pilots/OFFER_HUB_PILOT.md) is the reference
+standalone implementation for this track. It keeps marketplace selection and
+payment outside Sub Rosa while exercising the real `ReceiptOnly` lifecycle.
+
 ## Economic auction pilot
 
 Use this track for a marketplace, asset issuer, game, collectible, or other

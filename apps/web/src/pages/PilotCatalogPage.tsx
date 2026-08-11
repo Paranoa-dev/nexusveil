@@ -50,8 +50,9 @@ const PILOTS = [
     description: "Let clients collect freelancer proposals privately and reveal them together at the deadline before selecting a provider.",
     meta: "ReceiptOnly · Marketplace",
     logo: "/pilots/offer-hub/offer-hub.jpg",
+    href: "#/pilot/offer-hub",
     className: "offer-hub",
-    status: "comingSoon",
+    status: "live",
   },
   {
     eyebrow: "Agent bidding",

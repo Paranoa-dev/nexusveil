@@ -184,6 +184,34 @@ describe("SubRosaClient transaction evidence", () => {
   });
 });
 
+describe("SubRosaClient Core v2 deployment compatibility", () => {
+  it("treats a missing policy view as a pre-policy Core v2 round", async () => {
+    const client = new SubRosaClient(BASE_CONFIG);
+    Object.defineProperty(client.contract, "get_round_policy_v2", {
+      configurable: true,
+      value: async () => {
+        throw new Error(
+          "HostError: trying to invoke non-existent contract function get_round_policy_v2",
+        );
+      },
+    });
+
+    assert.equal(await client.getRoundPolicyV2(7), undefined);
+  });
+
+  it("does not hide unrelated policy read failures", async () => {
+    const client = new SubRosaClient(BASE_CONFIG);
+    Object.defineProperty(client.contract, "get_round_policy_v2", {
+      configurable: true,
+      value: async () => {
+        throw new Error("HostError: storage MissingValue");
+      },
+    });
+
+    await assert.rejects(client.getRoundPolicyV2(7), /storage MissingValue/);
+  });
+});
+
 describe("SubRosaClient source configuration", () => {
   it("accepts wallet signing adapters with their public source", () => {
     const signTransaction = async () => ({ signedTxXdr: "AAAA" });

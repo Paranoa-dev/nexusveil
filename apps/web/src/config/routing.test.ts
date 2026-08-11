@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   hashFor,
+  offerHubPilotRoundIdFromHash,
   pilotRoundIdFromHash,
   routeFromHash,
   trustlessWorkPilotRoundIdFromHash,
@@ -29,6 +30,10 @@ test("pilot routes open the partner workspace", () => {
     page: "trustlessWorkPilot",
     useCase: "auction",
   });
+  assert.deepEqual(routeFromHash("#/pilot/offer-hub"), {
+    page: "offerHubPilot",
+    useCase: "auction",
+  });
 });
 
 test("pilot round links accept only numeric round ids", () => {
@@ -43,6 +48,13 @@ test("pilot navigation emits the canonical workspace hash", () => {
   assert.equal(hashFor("basicPilot"), "#/pilot/basic");
   assert.equal(hashFor("signalPilot"), "#/pilot/the-signal");
   assert.equal(hashFor("trustlessWorkPilot"), "#/pilot/trustless-work");
+  assert.equal(hashFor("offerHubPilot"), "#/pilot/offer-hub");
+});
+
+test("offer-hub pilot round links accept only numeric round ids", () => {
+  assert.equal(offerHubPilotRoundIdFromHash("#/pilot/offer-hub/42"), "42");
+  assert.equal(offerHubPilotRoundIdFromHash("#pilot/offer-hub/0007"), "0007");
+  assert.equal(offerHubPilotRoundIdFromHash("#/pilot/offer-hub/not-a-round"), "");
 });
 
 test("trustless work pilot round links accept only numeric round ids", () => {

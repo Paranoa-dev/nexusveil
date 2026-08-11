@@ -176,3 +176,8 @@ Drand publishes `R` and does not need participant secret keys.
 Receipt verification is offline and checks internal consistency. Applications
 that need ledger provenance should also query the configured contract and
 network directly.
+
+For a complete marketplace-shaped example, see the
+[Offer-Hub sealed-proposal pilot](./pilots/OFFER_HUB_PILOT.md). It uses the
+existing SDK template and Core v2 lifecycle while keeping provider selection at
+the application layer.
