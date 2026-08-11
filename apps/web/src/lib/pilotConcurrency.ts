@@ -1,5 +1,18 @@
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 function hasContractError(
@@ -21,4 +34,14 @@ export function isRevealAlreadyOpen(error: unknown): boolean {
 
 export function isSubmissionAlreadyRevealed(error: unknown): boolean {
   return hasContractError(error, 32, "AlreadyRevealed");
+}
+
+export function isTxBadSeqError(error: unknown): boolean {
+  const message = errorMessage(error);
+  return (
+    message.includes("txBadSeq") ||
+    message.includes("tx_bad_seq") ||
+    message.includes('"value":-5') ||
+    message.includes('"value": -5')
+  );
 }

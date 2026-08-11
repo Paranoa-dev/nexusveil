@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   isRevealAlreadyOpen,
   isSubmissionAlreadyRevealed,
+  isTxBadSeqError,
 } from "./pilotConcurrency.js";
 
 test("recognizes an already-open reveal race by contract code or name", () => {
@@ -22,4 +23,22 @@ test("recognizes a submission revealed concurrently", () => {
   );
   assert.equal(isSubmissionAlreadyRevealed(new Error("AlreadyRevealed")), true);
   assert.equal(isSubmissionAlreadyRevealed(new Error("HashMismatch")), false);
+});
+
+test("recognizes Stellar bad-sequence responses without hiding other errors", () => {
+  assert.equal(
+    isTxBadSeqError(
+      new Error(
+        'Sending failed {"result":{"_switch":{"name":"txBadSeq","value":-5}}}',
+      ),
+    ),
+    true,
+  );
+  assert.equal(
+    isTxBadSeqError({
+      message: 'Sending failed {"result":{"_switch":{"value": -5}}}',
+    }),
+    true,
+  );
+  assert.equal(isTxBadSeqError(new Error("Contract, #32")), false);
 });

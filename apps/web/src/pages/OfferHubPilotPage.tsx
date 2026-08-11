@@ -76,9 +76,15 @@ import {
   OFFER_HUB_STAGE_LABELS,
 } from "../lib/offerHubPilot";
 import { decodePilotSubmission } from "../lib/pilotSubmission";
-import { isRevealAlreadyOpen, isSubmissionAlreadyRevealed } from "../lib/pilotConcurrency";
+import {
+  isRevealAlreadyOpen,
+  isSubmissionAlreadyRevealed,
+  isTxBadSeqError,
+} from "../lib/pilotConcurrency";
 import { useToast } from "../ui/Toast";
 import { ConfettiBurst } from "../ui/Confetti";
+
+type SignableTransaction<T> = { signAndSend: () => Promise<T> };
 
 function shortAddress(value: string | undefined): string {
   if (!value) return "None";
@@ -470,6 +476,30 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
     }
   }
 
+  async function signAndSendWithSequenceRetry<T>(
+    buildTransaction: () => Promise<SignableTransaction<T>>,
+  ): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const tx = await buildTransaction();
+        return await tx.signAndSend();
+      } catch (error) {
+        lastError = error;
+        if (!isTxBadSeqError(error) || attempt === 2) throw error;
+        toast.push(
+          "info",
+          "Wallet sequence refreshed",
+          "Retrying with the latest Stellar account sequence.",
+        );
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(displayError(lastError));
+  }
+
   async function refreshLive(target = workspace.roundId ?? workspace.roundInput) {
     if (!reader || !target || !/^\d+$/.test(target)) return null;
     const request = ++refreshRequest.current;
@@ -555,11 +585,10 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
         lot_asset: undefined,
         lot_amount: 0n,
       };
-      const tx = await contract.create_round_v2({
+      const sent = await signAndSendWithSequenceRetry(() => contract.create_round_v2({
         ...commonArgs,
         settlement,
-      });
-      const sent = await tx.signAndSend();
+      }));
       const nextId = sent.result.unwrap().toString();
       const hash = transactionHash(sent);
       setWorkspace((current) => ({
@@ -649,6 +678,7 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
       if (round.status.tag !== "Open") {
         throw new Error(`This round is already ${round.status.tag.toLowerCase()}.`);
       }
+      const liveRoundId = workspace.roundId;
       const drand = quicknet();
       const sealed = await sealProposal({
         round: Number(round.reveal_round),
@@ -658,22 +688,21 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
         identity: new TextEncoder().encode(address),
         auditorPublicKey: new Uint8Array(round.auditor_pubkey),
       });
-      const tx = await contract.commit_v2({
-        round_id: BigInt(workspace.roundId),
+      const sent = await signAndSendWithSequenceRetry(() => contract.commit_v2({
+        round_id: BigInt(liveRoundId),
         bidder: address,
         commitment: Buffer.from(sealed.commitment),
         ciphertext: Buffer.from(sealed.ciphertext),
         escrow: 0n,
         auditor_blob: Buffer.from(sealed.auditorBlob),
-      });
-      const sent = await tx.signAndSend();
+      }));
       const hash = transactionHash(sent);
       setWorkspace((current) => ({
         ...current,
         transactionHashes: hash ? Array.from(new Set([...current.transactionHashes, hash])) : current.transactionHashes,
       }));
       await refreshLive();
-      toast.push("success", "Private proposal submitted", `Sealed on ReceiptOnly round #${workspace.roundId}`);
+      toast.push("success", "Private proposal submitted", `Sealed on ReceiptOnly round #${liveRoundId}`);
     } catch (error) {
       toast.push("error", "Proposal submission failed", displayError(error));
     } finally {
@@ -704,11 +733,10 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
       if (current.status.tag === "Open") {
         const signature = await fetchRoundSignature(drand, Number(current.reveal_round));
         try {
-          const open = await contract.open_reveal_v2({
+          const sent = await signAndSendWithSequenceRetry(() => contract.open_reveal_v2({
             round_id: rid,
             drand_signature: Buffer.from(signature),
-          });
-          const sent = await open.signAndSend();
+          }));
           const hash = transactionHash(sent);
           if (hash) {
             setWorkspace((state) => ({
@@ -723,19 +751,22 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
       }
       const bidders = (await contract.get_bidders_v2({ round_id: rid })).result.unwrap();
       let revealedCount = 0;
+      let alreadyRevealedCount = 0;
       for (const bidder of bidders) {
         const state = (await contract.get_submission_v2({ round_id: rid, bidder })).result.unwrap();
-        if (state.revealed_envelope != null) continue;
+        if (state.revealed_envelope != null) {
+          alreadyRevealedCount += 1;
+          continue;
+        }
         const seal = (await contract.get_seal_v2({ round_id: rid, bidder })).result;
         if (!seal) throw new Error(`Encrypted proposal is unavailable for ${shortAddress(bidder)}`);
         const envelope = await openPayload(new Uint8Array(seal.ciphertext), drand);
         try {
-          const reveal = await contract.reveal_v2({
+          const sent = await signAndSendWithSequenceRetry(() => contract.reveal_v2({
             round_id: rid,
             bidder,
             envelope: Buffer.from(encodePayloadEnvelope(envelope)),
-          });
-          const sent = await reveal.signAndSend();
+          }));
           const hash = transactionHash(sent);
           if (hash) {
             setWorkspace((state) => ({
@@ -746,13 +777,16 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
           revealedCount += 1;
         } catch (error) {
           if (!isSubmissionAlreadyRevealed(error)) throw error;
+          alreadyRevealedCount += 1;
         }
       }
 
+      await refreshLive();
       current = (await contract.get_round_v2({ round_id: rid })).result.unwrap();
       if (current.status.tag === "Revealing") {
-        const clearTx = await contract.clear_v2({ round_id: rid });
-        const clearSent = await clearTx.signAndSend();
+        const clearSent = await signAndSendWithSequenceRetry(() => (
+          contract.clear_v2({ round_id: rid })
+        ));
         const clearHash = transactionHash(clearSent);
         if (clearHash) {
           setWorkspace((state) => ({
@@ -763,8 +797,13 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
       }
 
       await refreshLive();
-      toast.push("success", "Proposals revealed", `${revealedCount} submission(s) opened on-chain`);
+      toast.push(
+        "success",
+        "Proposals revealed",
+        `${revealedCount} new, ${alreadyRevealedCount} already open, ${bidders.length} participant(s) total`,
+      );
     } catch (error) {
+      await refreshLive().catch(() => null);
       toast.push("error", "Reveal failed", displayError(error));
     } finally {
       setBusy(null);
