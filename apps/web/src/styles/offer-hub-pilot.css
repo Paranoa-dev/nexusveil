@@ -10,6 +10,7 @@
 
 .offer-hub-hero > div:first-child {
   max-width: 780px;
+  min-width: 0;
 }
 
 .offer-hub-hero p {

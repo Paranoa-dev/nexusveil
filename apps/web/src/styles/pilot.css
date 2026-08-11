@@ -63,6 +63,12 @@
   letter-spacing: 0;
 }
 
+.pilot-header > div:first-child {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .pilot-kicker {
   color: #8ed0b2;
 }
@@ -409,6 +415,9 @@
 
   .pilot-nav-actions {
     justify-content: flex-end;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
   }
 
   .pilot-network {
@@ -425,6 +434,10 @@
     gap: 18px;
     width: calc(100% - 32px);
     padding: 28px 0 18px;
+  }
+
+  .pilot-nav {
+    flex-wrap: wrap;
   }
 
   .pilot-template-switch {

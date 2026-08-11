@@ -90,6 +90,12 @@
   padding: 68px 0 42px;
 }
 
+.signal-pilot-hero > div:first-child {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .signal-pilot-kicker {
   gap: 8px;
   color: #9aa7ff;
@@ -957,12 +963,16 @@
 @media (max-width: 720px) {
   .signal-pilot-nav {
     align-items: flex-start;
+    flex-wrap: wrap;
     padding: 12px 16px;
   }
 
   .signal-pilot-nav-actions {
     justify-content: flex-end;
     gap: 7px;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
   }
 
   .signal-pilot-network {
@@ -991,6 +1001,7 @@
 
   .signal-pilot-hero h1 {
     font-size: clamp(2.25rem, 12vw, 3.25rem);
+    max-width: 100%;
   }
 
   .signal-pilot-boundary {
