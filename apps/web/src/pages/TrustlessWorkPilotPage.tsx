@@ -2113,9 +2113,12 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
           <h1>Sub Rosa x Trustless Work</h1>
           <p className="lede">Private proposals stay sealed through the deadline, then the chosen proposal is converted into a real Trustless Work multi-release escrow on testnet.</p>
         </div>
-        <div className="pilot-template-switch" aria-label="Role">
-          <button type="button" className={role === "organizer" ? "active" : ""} onClick={() => setRole("organizer")}>Organizer</button>
-          <button type="button" className={role === "provider" ? "active" : ""} onClick={() => setRole("provider")}>Provider</button>
+        <div className="pilot-partner-identity trustless-work-partner-identity">
+          <img className="pilot-partner-mark" src="/pilots/trustless-work/trustless-work-logo.webp" alt="Trustless Work" />
+          <div className="pilot-template-switch" aria-label="Role">
+            <button type="button" className={role === "organizer" ? "active" : ""} onClick={() => setRole("organizer")}>Organizer</button>
+            <button type="button" className={role === "provider" ? "active" : ""} onClick={() => setRole("provider")}>Provider</button>
+          </div>
         </div>
       </header>
 

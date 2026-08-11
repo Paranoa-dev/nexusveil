@@ -91,6 +91,23 @@
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset;
 }
 
+.pilot-partner-identity {
+  display: grid;
+  justify-items: end;
+  gap: 12px;
+  min-width: 220px;
+}
+
+.pilot-partner-mark {
+  display: block;
+  width: 96px;
+  height: 96px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  object-fit: cover;
+  box-shadow: var(--shadow-md);
+}
+
 .pilot-alert {
   width: min(1480px, calc(100% - 48px));
   margin: 0 auto 16px;
@@ -419,6 +436,15 @@
     min-width: 0;
     padding: 0 8px;
     white-space: normal;
+  }
+
+  .pilot-partner-identity {
+    justify-items: stretch;
+    width: 100%;
+  }
+
+  .pilot-partner-mark {
+    justify-self: end;
   }
 
   .pilot-alert,

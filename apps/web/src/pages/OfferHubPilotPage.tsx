@@ -983,21 +983,24 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
             selection logic.
           </div>
         </div>
-        <div className="pilot-template-switch" role="tablist" aria-label="Pilot view">
-          <button
-            type="button"
-            className={workspace.view === "client" ? "active" : ""}
-            onClick={() => setWorkspace((current) => ({ ...current, view: "client" }))}
-          >
-            Client / organizer
-          </button>
-          <button
-            type="button"
-            className={workspace.view === "provider" ? "active" : ""}
-            onClick={() => setWorkspace((current) => ({ ...current, view: "provider" }))}
-          >
-            Freelancer / provider
-          </button>
+        <div className="pilot-partner-identity offer-hub-partner-identity">
+          <img className="pilot-partner-mark" src="/pilots/offer-hub/offer-hub.jpg" alt="Offer-Hub" />
+          <div className="pilot-template-switch" role="tablist" aria-label="Pilot view">
+            <button
+              type="button"
+              className={workspace.view === "client" ? "active" : ""}
+              onClick={() => setWorkspace((current) => ({ ...current, view: "client" }))}
+            >
+              Client / organizer
+            </button>
+            <button
+              type="button"
+              className={workspace.view === "provider" ? "active" : ""}
+              onClick={() => setWorkspace((current) => ({ ...current, view: "provider" }))}
+            >
+              Freelancer / provider
+            </button>
+          </div>
         </div>
       </section>
 

@@ -1100,8 +1100,11 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
           </div>
         </div>
         <div className="signal-pilot-hero-actions">
-          <button type="button" className="primary-action" onClick={() => setRole("organizer")}><Users size={16} />Open organizer view</button>
-          <button type="button" className="secondary-action" onClick={() => setRole("provider")}><LockKeyhole size={16} />Submit as provider</button>
+          <img className="pilot-partner-mark" src="/pilots/the-signal/the-signal-logo.png" alt="The Signal" />
+          <div className="signal-hero-action-row">
+            <button type="button" className="primary-action" onClick={() => setRole("organizer")}><Users size={16} />Open organizer view</button>
+            <button type="button" className="secondary-action" onClick={() => setRole("provider")}><LockKeyhole size={16} />Submit as provider</button>
+          </div>
         </div>
       </section>
 
