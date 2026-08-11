@@ -51,8 +51,9 @@ const PILOTS = [
     description: "Gate private submissions with verified credentials, then turn verified round outcomes into portable attestations.",
     meta: "Credentials · ReceiptOnly",
     logo: "/pilots/acta/ACTA.jpg",
+    href: "#/pilot/acta",
     className: "acta",
-    status: "comingSoon",
+    status: "live",
   },
   {
     eyebrow: "Agent bidding",

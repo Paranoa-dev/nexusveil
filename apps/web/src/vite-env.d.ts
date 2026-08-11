@@ -15,6 +15,8 @@ interface ImportMetaEnv {
   readonly VITE_TRUSTLESS_WORK_TRUSTLINE_CONTRACT_ID?: string;
   readonly VITE_TRUSTLESS_WORK_TRUSTLINE_SYMBOL?: string;
   readonly VITE_TRUSTLESS_WORK_TRUSTLINE_ADDRESS?: string;
+  readonly VITE_ACTA_BASE_URL?: string;
+  readonly VITE_ACTA_API_KEY?: string;
   readonly VITE_PASSKEY_WALLET_WASM_HASH?: string;
   readonly VITE_PASSKEY_RP_ID?: string;
 }
