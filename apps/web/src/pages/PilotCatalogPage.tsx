@@ -1,4 +1,4 @@
-import { ArrowRight, ExternalLink, Plus, ShieldCheck } from "lucide-react";
+import { ArrowRight, ExternalLink, ShieldCheck } from "lucide-react";
 
 interface PilotCatalogPageProps {
   goHome: () => void;
@@ -85,15 +85,6 @@ export function PilotCatalogPage({ goHome }: PilotCatalogPageProps) {
             {livePilotCount.toString().padStart(2, "0")} live · {comingSoonPilotCount.toString().padStart(2, "0")} coming
           </span>
       </header>
-
-      <div className="pilot-catalog-teaser" role="status">
-        <span className="pilot-catalog-teaser-mark"><Plus size={15} /></span>
-        <div>
-          <span className="pilot-catalog-teaser-label">More on the way</span>
-          <strong>New partner pilots are taking shape.</strong>
-        </div>
-        <span className="pilot-catalog-teaser-dots" aria-hidden="true"><i /><i /><i /></span>
-      </div>
 
       <section className="pilot-catalog-grid" aria-label="Pilot workspaces">
         {PILOTS.map((pilot, index) => (

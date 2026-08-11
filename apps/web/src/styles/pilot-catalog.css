@@ -71,9 +71,10 @@
 }
 
 .pilot-catalog-card-status.live {
-  border-color: rgba(113, 214, 170, 0.25);
-  color: var(--green);
-  background: rgba(113, 214, 170, 0.08);
+  border-color: rgba(110, 245, 176, 0.62);
+  color: #a5ffd0;
+  background: rgba(110, 245, 176, 0.17);
+  box-shadow: 0 0 14px rgba(110, 245, 176, 0.12);
 }
 
 .pilot-catalog-card-status.coming {
@@ -99,8 +100,7 @@
 }
 
 .pilot-catalog-header,
-.pilot-catalog-grid,
-.pilot-catalog-teaser {
+.pilot-catalog-grid {
   width: min(1180px, 100%);
   margin-inline: auto;
 }
@@ -136,75 +136,6 @@
   flex: 0 0 auto;
   padding-bottom: 8px;
   color: var(--faint);
-}
-
-.pilot-catalog-teaser {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 58px;
-  margin-bottom: 14px;
-  padding: 10px 14px;
-  border: 1px dashed rgba(91, 108, 255, 0.28);
-  border-radius: 8px;
-  background: rgba(91, 108, 255, 0.035);
-}
-
-.pilot-catalog-teaser-mark {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid rgba(91, 108, 255, 0.38);
-  border-radius: 50%;
-  color: var(--green);
-}
-
-.pilot-catalog-teaser > div {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-
-.pilot-catalog-teaser-label {
-  color: var(--green);
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.pilot-catalog-teaser strong {
-  color: var(--ink-2);
-  font-size: 0.88rem;
-  font-weight: 600;
-}
-
-.pilot-catalog-teaser-dots {
-  display: flex;
-  gap: 5px;
-  margin-left: auto;
-}
-
-.pilot-catalog-teaser-dots i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--green);
-  opacity: 0.35;
-  animation: pilot-catalog-dot 1.8s var(--ease-in-out) infinite;
-}
-
-.pilot-catalog-teaser-dots i:nth-child(2) { animation-delay: 180ms; }
-.pilot-catalog-teaser-dots i:nth-child(3) { animation-delay: 360ms; }
-
-@keyframes pilot-catalog-dot {
-  0%, 100% { opacity: 0.25; transform: translateY(0); }
-  45% { opacity: 0.9; transform: translateY(-2px); }
 }
 
 .pilot-catalog-grid {
@@ -395,12 +326,4 @@
     margin-top: 20px;
   }
 
-  .pilot-catalog-teaser > div {
-    display: block;
-  }
-
-  .pilot-catalog-teaser strong {
-    display: block;
-    margin-top: 3px;
-  }
 }
