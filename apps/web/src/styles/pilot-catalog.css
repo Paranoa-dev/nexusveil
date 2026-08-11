@@ -71,10 +71,9 @@
 }
 
 .pilot-catalog-card-status.live {
-  border-color: rgba(110, 245, 176, 0.62);
-  color: #a5ffd0;
-  background: rgba(110, 245, 176, 0.17);
-  box-shadow: 0 0 14px rgba(110, 245, 176, 0.12);
+  border-color: rgba(110, 245, 176, 0.36);
+  color: #86eeb1;
+  background: rgba(110, 245, 176, 0.1);
 }
 
 .pilot-catalog-card-status.coming {
