@@ -59,6 +59,7 @@ export interface ActaPilotWorkspace {
 
 export const ACTA_PILOT_STORAGE_KEY = "subrosa-acta-pilot-v1";
 export const ACTA_DEFAULT_CREDENTIAL_TYPE = "VerifiedProviderCredential";
+export const ACTA_DEFAULT_TRUSTED_ISSUER_DID = "did:stellar:testnet:sd2tszkfg2t7on3clzr3zqlhea";
 
 export function defaultActaProposalDraft(): ActaProposalDraft {
   return {
@@ -79,7 +80,7 @@ export function defaultActaPilotWorkspace(now = Date.now()): ActaPilotWorkspace 
     credentialLabel: "Verified Provider",
     policy: {
       credentialType: ACTA_DEFAULT_CREDENTIAL_TYPE,
-      trustedIssuerDid: "",
+      trustedIssuerDid: ACTA_DEFAULT_TRUSTED_ISSUER_DID,
     },
     roundId: null,
     roundInput: "",
@@ -113,10 +114,12 @@ export function parseActaPilotWorkspace(value: string): ActaPilotWorkspace {
   const eligibility = parsed.eligibility && typeof parsed.eligibility === "object"
     ? parsed.eligibility
     : null;
+  const policy = { ...fallback.policy, ...(parsed.policy ?? {}) };
+  if (!policy.trustedIssuerDid.trim()) policy.trustedIssuerDid = fallback.policy.trustedIssuerDid;
   return {
     ...fallback,
     ...parsed,
-    policy: { ...fallback.policy, ...(parsed.policy ?? {}) },
+    policy,
     proposalDraft: { ...fallback.proposalDraft, ...(parsed.proposalDraft ?? {}) },
     demoProposals: Array.isArray(parsed.demoProposals) ? parsed.demoProposals : [],
     transactionHashes: Array.isArray(parsed.transactionHashes) ? parsed.transactionHashes : [],

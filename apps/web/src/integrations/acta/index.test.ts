@@ -11,9 +11,9 @@ import {
   type ActaOutcomeEvidence,
 } from "./index.js";
 
-const ISSUER = `did:stellar:testnet:G${"A".repeat(55)}`;
-const OTHER_ISSUER = `did:stellar:testnet:G${"B".repeat(55)}`;
-const SUBJECT = `did:stellar:testnet:G${"C".repeat(55)}`;
+const ISSUER = "did:stellar:testnet:sd2tszkfg2t7on3clzr3zqlhea";
+const OTHER_ISSUER = "did:stellar:testnet:znfxngsh46vkyqu6inrx4omphi";
+const SUBJECT = "did:stellar:testnet:uh2q4w6x7m3j5k8p9r2s4t6v8y";
 
 function credential(issuer = ISSUER) {
   return {
@@ -69,6 +69,7 @@ test("validates did:stellar issuer syntax and network", () => {
   assert.equal(isValidActaIssuerDid(ISSUER, "testnet"), true);
   assert.equal(isValidActaIssuerDid(ISSUER, "mainnet"), false);
   assert.equal(isValidActaIssuerDid("GNOT_A_DID", "testnet"), false);
+  assert.equal(isValidActaIssuerDid("did:stellar:testnet:GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "testnet"), false);
 });
 
 test("outcome credentials require a real revealed source event", () => {

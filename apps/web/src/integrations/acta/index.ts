@@ -142,7 +142,7 @@ function statusFromResponse(value: unknown): ActaCredentialStatus {
 }
 
 export function isValidActaIssuerDid(value: string, network?: "testnet" | "mainnet"): boolean {
-  const match = /^did:stellar:(testnet|mainnet):([GC][A-Z2-7]{55})$/.exec(value.trim());
+  const match = /^did:stellar:(testnet|mainnet):([a-z2-7]{26})$/.exec(value.trim());
   return Boolean(match && (!network || match[1] === network));
 }
 
