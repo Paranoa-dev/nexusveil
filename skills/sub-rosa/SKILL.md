@@ -113,7 +113,7 @@ independently reviewed.
 
 ## Sources
 
-- SDK and protocol source: https://github.com/karagozemin/Sub-Rosa/tree/feat/core-v2
+- SDK and protocol source: https://github.com/karagozemin/Sub-Rosa/tree/main
 - Integration docs: https://sub-rosa-web.vercel.app/#/docs
 - Published package: https://www.npmjs.com/package/@sub-rosa/sdk
 - Stellar smart contract docs: https://developers.stellar.org/docs/build/smart-contracts
