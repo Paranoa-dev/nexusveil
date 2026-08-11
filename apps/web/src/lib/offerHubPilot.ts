@@ -180,6 +180,90 @@ export function emptyOfferHubProposalDraft(): OfferHubProposalDraft {
   };
 }
 
+const OFFER_HUB_PROVIDER_PROFILES = [
+  {
+    name: "Nova Labs",
+    meta: "Stellar product studio",
+    focus: "merchant KPIs, payment activity, and export-ready reporting",
+    experience: "Delivered Stellar payment dashboards and Horizon-backed analytics pipelines.",
+    milestones: "Dashboard UX\nPayment data integration\nQA and analytics handoff",
+  },
+  {
+    name: "StellarCraft",
+    meta: "Payments analytics team",
+    focus: "reliable ledger ingestion, merchant cohorts, and reconciliation views",
+    experience: "Built SEP-24 operations tooling and merchant reconciliation products.",
+    milestones: "Data model\nDashboard implementation\nReconciliation review",
+  },
+  {
+    name: "Orbit Studio",
+    meta: "Freelance design and engineering",
+    focus: "a lightweight analytics workspace shaped by early merchant feedback",
+    experience: "Designed operational dashboards for crypto checkout and support teams.",
+    milestones: "Dashboard MVP\nMerchant feedback pass\nFinal polish",
+  },
+  {
+    name: "LedgerWorks",
+    meta: "Stellar data engineering collective",
+    focus: "streaming transaction metrics, anomaly detection, and durable data jobs",
+    experience: "Operated ledger ingestion and reporting systems for payment platforms.",
+    milestones: "Ingestion pipeline\nAnalytics views\nReliability testing",
+  },
+  {
+    name: "Northstar Digital",
+    meta: "Fintech product consultancy",
+    focus: "merchant segmentation, executive reporting, and accessible dashboard UX",
+    experience: "Shipped fintech analytics products from discovery through production rollout.",
+    milestones: "Product discovery\nDashboard delivery\nTeam training",
+  },
+  {
+    name: "Quasar Systems",
+    meta: "Full-stack Stellar specialists",
+    focus: "fast account activity queries, role-based views, and reporting automation",
+    experience: "Built Stellar account tooling, indexing services, and internal admin products.",
+    milestones: "Technical architecture\nFeature implementation\nPerformance review",
+  },
+] as const;
+
+function stableProviderHash(value: string): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+export function offerHubProposalDraftForProvider(
+  providerIdentity: string,
+  variation = 0,
+): OfferHubProposalDraft {
+  const hash = stableProviderHash(`${providerIdentity.trim()}:${variation}`);
+  const profile = OFFER_HUB_PROVIDER_PROFILES[hash % OFFER_HUB_PROVIDER_PROFILES.length]!;
+  const proposedPrice = 1_225 + (hash % 28) * 25;
+  const estimatedDeliveryDays = 14 + ((hash >>> 8) % 19);
+  return {
+    freelancerName: profile.name,
+    providerMeta: profile.meta,
+    proposedPrice: proposedPrice.toLocaleString("en-US"),
+    estimatedDeliveryDays: estimatedDeliveryDays.toString(),
+    shortProposal:
+      `Deliver the Stellar merchant dashboard in ${estimatedDeliveryDays} days, focusing on ${profile.focus}.`,
+    relevantExperience: profile.experience,
+    milestoneSummary: profile.milestones,
+  };
+}
+
+export function isOfferHubProposalDraftPristine(
+  draft: OfferHubProposalDraft,
+): boolean {
+  const fallback = defaultOfferHubProposalDraft();
+  const keys = Object.keys(fallback) as Array<keyof OfferHubProposalDraft>;
+  return (
+    keys.every((key) => !draft[key].trim()) ||
+    keys.every((key) => draft[key] === fallback[key])
+  );
+}
+
 export function deadlineSeconds(preset: OfferHubDeadlinePreset): number {
   return OFFER_HUB_DEADLINE_OPTIONS.find((entry) => entry.value === preset)?.seconds ?? 5 * 60;
 }

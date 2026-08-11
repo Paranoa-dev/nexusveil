@@ -11,8 +11,10 @@ import {
   deriveOfferHubStage,
   offerHubEvidenceSummary,
   offerHubLiveConfigurationIssues,
+  offerHubProposalDraftForProvider,
   offerHubProposalRows,
   offerHubSealInputFromDraft,
+  isOfferHubProposalDraftPristine,
   parseOfferHubWorkspace,
   sampleOfferHubProposals,
   selectOfferHubProvider,
@@ -64,6 +66,34 @@ test("validates and maps structured freelancer proposal fields", () => {
   assert.equal(sealed.proposal.currency, "USDC");
   assert.equal(sealed.proposal.metadata?.providerName, "Nova Labs");
   assert.equal(sealed.recordData.relevantExperience.length > 0, true);
+});
+
+test("seeds realistic, stable, provider-specific proposal drafts", () => {
+  const providerA = offerHubProposalDraftForProvider(
+    "GARG3WZ5CS6NB7VHHTJPDJFYUXC62BUPOEG4O2JPB55EBQ5UQTDCXQT7",
+  );
+  const providerB = offerHubProposalDraftForProvider(
+    "GDZ7GNFGVOQXOKCTE3X4H3IU6C7PL44LOOWNFEWJ72V5C4IMYVPV5SBA",
+  );
+  assert.deepEqual(
+    offerHubProposalDraftForProvider(
+      "GARG3WZ5CS6NB7VHHTJPDJFYUXC62BUPOEG4O2JPB55EBQ5UQTDCXQT7",
+    ),
+    providerA,
+  );
+  assert.notDeepEqual(providerA, providerB);
+  assert.notEqual(providerA.proposedPrice, providerB.proposedPrice);
+  assert.notEqual(providerA.shortProposal, providerB.shortProposal);
+  assert.doesNotThrow(() => offerHubSealInputFromDraft(providerA));
+  assert.doesNotThrow(() => offerHubSealInputFromDraft(providerB));
+});
+
+test("replaces only untouched proposal forms during wallet seeding", () => {
+  assert.equal(isOfferHubProposalDraftPristine(defaultOfferHubProposalDraft()), true);
+  assert.equal(isOfferHubProposalDraftPristine({
+    ...defaultOfferHubProposalDraft(),
+    shortProposal: "My manually edited proposal",
+  }), false);
 });
 
 test("rejects invalid price, timeline, and required proposal content", () => {

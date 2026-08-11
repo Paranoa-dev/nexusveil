@@ -36,15 +36,6 @@ const PILOTS = [
     status: "live",
   },
   {
-    eyebrow: "Credential layer",
-    title: "ACTA",
-    description: "Gate private submissions with verified credentials, then turn verified round outcomes into portable attestations.",
-    meta: "Credentials · ReceiptOnly",
-    logo: "/pilots/acta/ACTA.jpg",
-    className: "acta",
-    status: "comingSoon",
-  },
-  {
     eyebrow: "Sealed proposals",
     title: "Offer-Hub",
     description: "Let clients collect freelancer proposals privately and reveal them together at the deadline before selecting a provider.",
@@ -53,6 +44,15 @@ const PILOTS = [
     href: "#/pilot/offer-hub",
     className: "offer-hub",
     status: "live",
+  },
+  {
+    eyebrow: "Credential layer",
+    title: "ACTA",
+    description: "Gate private submissions with verified credentials, then turn verified round outcomes into portable attestations.",
+    meta: "Credentials · ReceiptOnly",
+    logo: "/pilots/acta/ACTA.jpg",
+    className: "acta",
+    status: "comingSoon",
   },
   {
     eyebrow: "Agent bidding",

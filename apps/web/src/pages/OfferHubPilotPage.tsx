@@ -60,9 +60,11 @@ import {
   offerHubEvidenceSummary,
   offerHubLiveConfigurationIssues,
   offerHubProposalFromSubmission,
+  offerHubProposalDraftForProvider,
   offerHubProposalRows,
   offerHubSealedProposalForBidder,
   offerHubSealInputFromDraft,
+  isOfferHubProposalDraftPristine,
   parseOfferHubWorkspace,
   selectOfferHubProvider,
   serializeOfferHubWorkspace,
@@ -467,7 +469,13 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
         throw new Error(`Switch Freighter to the configured network (${NETWORK_LABEL})`);
       }
       setAddress(nextAddress);
-      setWorkspace((current) => ({ ...current, mode: "live" }));
+      setWorkspace((current) => ({
+        ...current,
+        mode: "live",
+        proposalDraft: isOfferHubProposalDraftPristine(current.proposalDraft)
+          ? offerHubProposalDraftForProvider(nextAddress)
+          : current.proposalDraft,
+      }));
       toast.push("success", "Wallet connected", shortAddress(nextAddress));
     } catch (error) {
       toast.push("error", "Wallet connection failed", displayError(error));
@@ -892,7 +900,18 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
     setWorkspace((current) => ({
       ...current,
       mode,
-      proposalDraft: defaultOfferHubProposalDraft(),
+      proposalDraft: mode === "live" && address
+        ? offerHubProposalDraftForProvider(address)
+        : defaultOfferHubProposalDraft(),
+    }));
+  }
+
+  function resetProposalForm() {
+    setWorkspace((current) => ({
+      ...current,
+      proposalDraft: current.mode === "live" && address
+        ? offerHubProposalDraftForProvider(address, Date.now())
+        : defaultOfferHubProposalDraft(),
     }));
   }
 
@@ -1177,9 +1196,9 @@ export function OfferHubPilotPage({ goHome }: { goHome: () => void }) {
                         <LockKeyhole size={15} />
                         {workspace.mode === "live" ? (busy === "submit" ? "Waiting..." : "Submit sealed proposal") : "Submit sample proposal"}
                       </button>
-                      <button type="button" className="secondary-action compact" onClick={() => setWorkspace((current) => ({ ...current, proposalDraft: defaultOfferHubProposalDraft() }))}>
+                      <button type="button" className="secondary-action compact" onClick={resetProposalForm}>
                         <RefreshCw size={15} />
-                        Reset form
+                        {workspace.mode === "live" ? "Generate new values" : "Reset form"}
                       </button>
                     </div>
                   </div>
