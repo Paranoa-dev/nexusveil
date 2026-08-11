@@ -39,6 +39,7 @@ import { LOGO_SRC } from "../lib/chain";
 import { pilotRoundIdFromHash } from "../config/routing";
 import { useDrandCountdown } from "../hooks/useDrandCountdown";
 import { useToast } from "../ui/Toast";
+import { ConfettiBurst } from "../ui/Confetti";
 import { pilotRevealAction } from "../lib/pilotReveal";
 import {
   isRevealAlreadyOpen,
@@ -83,6 +84,8 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
   const [timelineDays, setTimelineDays] = useState("14");
   const [approach, setApproach] = useState("Manual review, fuzzing, and remediation report");
   const [busy, setBusy] = useState<string | null>(null);
+  const [confettiTick, setConfettiTick] = useState(0);
+  const previousComplete = useRef<boolean | null>(null);
   const refreshRequest = useRef(0);
   const contract = useWalletContract(address);
   const reader = useReadOnlyContract();
@@ -103,6 +106,16 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
   const submissionIsAuction = round
     ? round.mode.tag === "Auction"
     : template === "auction";
+
+  const pilotComplete = round?.status.tag === "Settled";
+
+  useEffect(() => {
+    if (previousComplete.current === false && pilotComplete) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      setConfettiTick((current) => current + 1);
+    }
+    previousComplete.current = pilotComplete;
+  }, [pilotComplete]);
 
   const shareUrl = useMemo(() => {
     if (!roundId) return "";
@@ -474,6 +487,7 @@ export function PilotPage({ goHome }: { goHome: () => void }) {
 
   return (
     <main className="pilot-page">
+      <ConfettiBurst fire={confettiTick} count={48} />
       <nav className="pilot-nav">
         <button type="button" className="brand-link" onClick={goHome}>
           <img src={LOGO_SRC} alt="" />

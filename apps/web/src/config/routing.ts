@@ -6,7 +6,8 @@ export type Page =
   | "demo"
   | "architecture"
   | "dashboard"
-  | "pilot"
+  | "pilotCatalog"
+  | "basicPilot"
   | "signalPilot"
   | "trustlessWorkPilot"
   | "docs";
@@ -36,7 +37,10 @@ export function routeFromHash(source = window.location.hash): RouteState {
     if (parts[1] === "trustless-work") {
       return { page: "trustlessWorkPilot", useCase: "auction" };
     }
-    return { page: "pilot", useCase: "auction" };
+    if (parts[1] === "basic" || /^\d+$/.test(parts[1] ?? "")) {
+      return { page: "basicPilot", useCase: "auction" };
+    }
+    return { page: "pilotCatalog", useCase: "auction" };
   }
   if (parts[0] === "docs") {
     return { page: "docs", useCase: "auction" };
@@ -61,7 +65,8 @@ export function hashFor(page: Page, useCase: UseCaseId = "auction"): string {
   if (page === "landing") return "#/landing";
   if (page === "architecture") return "#/architecture";
   if (page === "dashboard") return "#/dashboard";
-  if (page === "pilot") return "#/pilot";
+  if (page === "pilotCatalog") return "#/pilot";
+  if (page === "basicPilot") return "#/pilot/basic";
   if (page === "signalPilot") return "#/pilot/the-signal";
   if (page === "trustlessWorkPilot") return "#/pilot/trustless-work";
   if (page === "docs") return "#/docs";

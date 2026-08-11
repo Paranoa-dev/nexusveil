@@ -8,6 +8,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { DemoPage } from "./pages/DemoPage";
 import { DocsPage } from "./pages/DocsPage";
 import { LandingPage } from "./pages/LandingPage";
+import { PilotCatalogPage } from "./pages/PilotCatalogPage";
 import { PilotPage } from "./pages/PilotPage";
 import { SignalPilotPage } from "./pages/SignalPilotPage";
 import { TrustlessWorkPilotPage } from "./pages/TrustlessWorkPilotPage";
@@ -38,7 +39,9 @@ export default function App() {
         />
       ) : route.page === "dashboard" ? (
         <DashboardPage goHome={() => navigate("landing")} />
-      ) : route.page === "pilot" ? (
+      ) : route.page === "pilotCatalog" ? (
+        <PilotCatalogPage goHome={() => navigate("landing")} />
+      ) : route.page === "basicPilot" ? (
         <PilotPage goHome={() => navigate("landing")} />
       ) : route.page === "signalPilot" ? (
         <SignalPilotPage goHome={() => navigate("landing")} />

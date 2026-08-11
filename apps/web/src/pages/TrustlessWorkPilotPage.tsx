@@ -58,6 +58,7 @@ import { isRevealAlreadyOpen, isSubmissionAlreadyRevealed } from "../lib/pilotCo
 import { decodePilotSubmission, type PilotSubmissionView } from "../lib/pilotSubmission";
 import { shortAddr, shortHash, usdc } from "../lib/format";
 import { useToast } from "../ui/Toast";
+import { ConfettiBurst } from "../ui/Confetti";
 import {
   buildMultiReleaseEscrow,
   fundMultiReleaseEscrow,
@@ -893,6 +894,8 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
   const [liveProposals, setLiveProposals] = useState<ProposalRecord[]>([]);
   const [liveLoadError, setLiveLoadError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [confettiTick, setConfettiTick] = useState(0);
+  const previousComplete = useRef<boolean | null>(null);
   const [roundProbeBusy, setRoundProbeBusy] = useState(false);
   const [nextLiveRoundId, setNextLiveRoundId] = useState<string | null>(null);
   const [roundInputWarning, setRoundInputWarning] = useState("");
@@ -942,6 +945,15 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
       : deadlinePassed
         ? "ready"
         : "collecting";
+  const pilotComplete = Boolean(trustlessWorkReceipt.fundSubmit?.txHash || trustlessWorkReceipt.fundSubmit?.status);
+
+  useEffect(() => {
+    if (previousComplete.current === false && pilotComplete) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      setConfettiTick((current) => current + 1);
+    }
+    previousComplete.current = pilotComplete;
+  }, [pilotComplete]);
   const activeTxHashes = transactionHashes.length > 0 ? transactionHashes : saved.transactionHashes;
   const activeLiveRoundId = hashRoundId || liveRoundId;
   const connectedWalletIsRoundOperator = Boolean(activeRoundReady && round && address && round.operator === address);
@@ -2073,6 +2085,7 @@ export function TrustlessWorkPilotPage({ goHome }: { goHome: () => void }) {
 
   return (
     <main className="pilot-page trustless-work-pilot-page">
+      <ConfettiBurst fire={confettiTick} count={48} />
       <nav className="pilot-nav">
         <button type="button" className="brand-link" onClick={goHome}>
           <img src={LOGO_SRC} alt="" />

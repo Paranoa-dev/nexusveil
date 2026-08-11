@@ -10,11 +10,15 @@ import {
 
 test("pilot routes open the partner workspace", () => {
   assert.deepEqual(routeFromHash("#/pilot"), {
-    page: "pilot",
+    page: "pilotCatalog",
     useCase: "auction",
   });
   assert.deepEqual(routeFromHash("#/pilot/42"), {
-    page: "pilot",
+    page: "basicPilot",
+    useCase: "auction",
+  });
+  assert.deepEqual(routeFromHash("#/pilot/basic"), {
+    page: "basicPilot",
     useCase: "auction",
   });
   assert.deepEqual(routeFromHash("#/pilot/the-signal"), {
@@ -35,7 +39,8 @@ test("pilot round links accept only numeric round ids", () => {
 });
 
 test("pilot navigation emits the canonical workspace hash", () => {
-  assert.equal(hashFor("pilot"), "#/pilot");
+  assert.equal(hashFor("pilotCatalog"), "#/pilot");
+  assert.equal(hashFor("basicPilot"), "#/pilot/basic");
   assert.equal(hashFor("signalPilot"), "#/pilot/the-signal");
   assert.equal(hashFor("trustlessWorkPilot"), "#/pilot/trustless-work");
 });

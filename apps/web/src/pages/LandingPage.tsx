@@ -53,9 +53,6 @@ export function LandingPage({
           <a href="#/dashboard" className="secondary-action compact">
             Dashboard
           </a>
-          <a href="#/pilot/trustless-work" className="secondary-action compact">
-            Trustless Work
-          </a>
           <a href="#/pilot" className="primary-action compact">
             Pilot workspace
           </a>
@@ -103,12 +100,6 @@ export function LandingPage({
             </a>
             <a className="secondary-action" href="#/docs" target="_blank" rel="noreferrer">
               Integration docs
-            </a>
-            <a className="secondary-action" href="#/pilot/the-signal">
-              Try the deal-flow pilot
-            </a>
-            <a className="secondary-action" href="#/pilot/trustless-work">
-              Trustless Work pilot
             </a>
           </motion.div>
 

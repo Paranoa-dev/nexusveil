@@ -53,6 +53,7 @@ import { useDrandCountdown } from "../hooks/useDrandCountdown";
 import { isRevealAlreadyOpen, isSubmissionAlreadyRevealed } from "../lib/pilotConcurrency";
 import { decodePilotSubmission, type PilotSubmissionView } from "../lib/pilotSubmission";
 import { useToast } from "../ui/Toast";
+import { ConfettiBurst } from "../ui/Confetti";
 
 type SignalDealType = "otc" | "loan";
 type SignalRole = "organizer" | "provider";
@@ -535,6 +536,8 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
   const [receiptAmount, setReceiptAmount] = useState("1");
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState(false);
+  const [confettiTick, setConfettiTick] = useState(0);
+  const previousComplete = useRef<boolean | null>(null);
   const [providerName, setProviderName] = useState("Your desk");
   const [providerMeta, setProviderMeta] = useState("Invited provider");
   const [offer, setOffer] = useState<SignalOfferData>(() => {
@@ -563,6 +566,15 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
     ? (mode === "live" ? liveOffers : offers).filter((entry) => entry.revealed)
     : [];
   const selectedOffer = (mode === "live" ? liveOffers : offers).find((entry) => entry.id === room.selectedProviderId);
+  const pilotComplete = room.status === "selected";
+
+  useEffect(() => {
+    if (previousComplete.current === false && pilotComplete) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      setConfettiTick((current) => current + 1);
+    }
+    previousComplete.current = pilotComplete;
+  }, [pilotComplete]);
 
   useEffect(() => {
     setRoomList((current) => {
@@ -1058,6 +1070,7 @@ export function SignalPilotPage({ goHome }: { goHome: () => void }) {
 
   return (
     <main className="signal-pilot-page">
+      <ConfettiBurst fire={confettiTick} count={48} />
       <nav className="signal-pilot-nav">
         <button type="button" className="brand-link" onClick={goHome}>
           <img src={LOGO_SRC} alt="" />
