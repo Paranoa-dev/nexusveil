@@ -1,5 +1,5 @@
 import { Buffer } from "buffer";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getNetworkDetails,
   isConnected,
@@ -172,6 +172,8 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
   const [receipt, setReceipt] = useState<CoreV2Receipt | null>(null);
   const [receiptVerified, setReceiptVerified] = useState<boolean | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [submissionConfirmed, setSubmissionConfirmed] = useState(false);
+  const submissionFeedbackTimer = useRef<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const contract = useWalletContract(address);
   const reader = useReadOnlyContract();
@@ -203,6 +205,12 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => () => {
+    if (submissionFeedbackTimer.current !== null) {
+      window.clearTimeout(submissionFeedbackTimer.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -473,6 +481,7 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
           source: "demo",
         };
         setWorkspace((current) => ({ ...current, demoProposals: [proposal] }));
+        showSubmissionConfirmation();
         toast.push("success", "Demo proposal sealed", "Local demo state only; no Stellar transaction was created.");
         return;
       }
@@ -498,12 +507,24 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
       }));
       addHash(transactionHash(sent));
       await refreshLive();
+      showSubmissionConfirmation();
       toast.push("success", "Sealed proposal submitted", "Proposal contents remain private until reveal.");
     } catch (error) {
       toast.push("error", "Submission failed", displayError(error));
     } finally {
       setBusy(null);
     }
+  }
+
+  function showSubmissionConfirmation() {
+    if (submissionFeedbackTimer.current !== null) {
+      window.clearTimeout(submissionFeedbackTimer.current);
+    }
+    setSubmissionConfirmed(true);
+    submissionFeedbackTimer.current = window.setTimeout(() => {
+      setSubmissionConfirmed(false);
+      submissionFeedbackTimer.current = null;
+    }, 2_200);
   }
 
   async function revealProposals() {
@@ -821,8 +842,8 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
                 {workspace.eligibility && <p className={`acta-status-message ${workspace.eligibility.state}`}>{workspace.eligibility.message}</p>}
               </section>
 
-              <section className="pilot-result">
-                <div className="pilot-result-heading"><span>Private proposal</span><strong>{canSubmit ? "Unlocked" : "Eligibility locked"}</strong></div>
+              <section className={`pilot-result acta-proposal-entry ${submissionConfirmed ? "sealed-confirmed" : ""}`}>
+                <div className="pilot-result-heading"><span>Private proposal</span><strong>{submissionConfirmed ? "Sealed" : canSubmit ? "Unlocked" : "Eligibility locked"}</strong></div>
                 <div className="acta-form">
                   <label>Provider name<input value={workspace.proposalDraft.providerName} onChange={(event) => updateDraft("providerName", event.target.value)} /></label>
                   <label>Proposed price (USDC)<input inputMode="decimal" value={workspace.proposalDraft.proposedPrice} onChange={(event) => updateDraft("proposedPrice", event.target.value)} /></label>
@@ -831,7 +852,7 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
                   <label className="acta-wide">Short proposal<textarea rows={4} value={workspace.proposalDraft.proposal} onChange={(event) => updateDraft("proposal", event.target.value)} /></label>
                 </div>
                 <div className="pilot-actions acta-actions">
-                  <button type="button" className="primary-action compact" onClick={submitProposal} disabled={busy !== null || !canSubmit || (workspace.mode === "live" && !round)}><LockKeyhole size={15} />{busy === "submit" ? "Submitting..." : "Submit sealed proposal"}</button>
+                  <button type="button" className={`primary-action compact acta-submit-action ${submissionConfirmed ? "confirmed" : ""}`} onClick={submitProposal} disabled={busy !== null || submissionConfirmed || !canSubmit || (workspace.mode === "live" && !round)}>{submissionConfirmed ? <CheckCircle2 size={15} /> : <LockKeyhole size={15} />}{busy === "submit" ? "Submitting..." : submissionConfirmed ? "Proposal sealed" : "Submit sealed proposal"}</button>
                   <button type="button" className="secondary-action compact" onClick={() => setWorkspace((current) => ({ ...current, proposalDraft: defaultActaProposalDraft() }))}><RefreshCw size={15} />Reset draft</button>
                 </div>
                 <p className="acta-copy">In Live mode the existing Sub Rosa SDK encrypts the proposal locally and `commit_v2` records only the sealed submission before the shared deadline.</p>
