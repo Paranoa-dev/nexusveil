@@ -74,11 +74,13 @@ import {
 } from "../lib/actaPilot";
 import {
   isRevealAlreadyOpen,
+  isRevealStillOpen,
   isSubmissionAlreadyRevealed,
   isTxBadSeqError,
 } from "../lib/pilotConcurrency";
 import { pilotRevealAction } from "../lib/pilotReveal";
 import { decodePilotSubmission } from "../lib/pilotSubmission";
+import { ConfettiBurst } from "../ui/Confetti";
 import { useToast } from "../ui/Toast";
 
 interface ActaPilotPageProps {
@@ -174,6 +176,7 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [submissionConfirmed, setSubmissionConfirmed] = useState(false);
   const submissionFeedbackTimer = useRef<number | null>(null);
+  const [revealCelebration, setRevealCelebration] = useState(0);
   const [now, setNow] = useState(Date.now());
   const contract = useWalletContract(address);
   const reader = useReadOnlyContract();
@@ -537,6 +540,7 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
         ...current,
         demoProposals: current.demoProposals.map((proposal) => ({ ...proposal, revealed: true })),
       }));
+      setRevealCelebration((current) => current + 1);
       toast.push("success", "Demo proposal revealed", "No ACTA or Stellar proof is claimed.");
       return;
     }
@@ -579,11 +583,17 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
       }
       await refreshLive();
       current = (await contract.get_round_v2({ round_id: roundId })).result.unwrap();
-      if (current.status.tag === "Revealing") {
-        const cleared = await signAndSendWithSequenceRetry(() => contract.clear_v2({ round_id: roundId }));
-        addHash(transactionHash(cleared));
+      const revealDeadlinePassed = Math.floor(Date.now() / 1_000) > Number(current.reveal_deadline);
+      if (current.status.tag === "Revealing" && revealDeadlinePassed) {
+        try {
+          const cleared = await signAndSendWithSequenceRetry(() => contract.clear_v2({ round_id: roundId }));
+          addHash(transactionHash(cleared));
+        } catch (error) {
+          if (!isRevealStillOpen(error)) throw error;
+        }
       }
       await refreshLive();
+      setRevealCelebration((value) => value + 1);
       toast.push("success", "Submissions revealed", `${bidders.length} participant(s) processed.`);
     } catch (error) {
       await refreshLive().catch(() => null);
@@ -705,6 +715,7 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
 
   return (
     <main className="pilot-page acta-pilot-page">
+      <ConfettiBurst fire={revealCelebration} count={24} />
       <nav className="pilot-nav">
         <button type="button" className="brand-link" onClick={goHome}>
           <img src="/sub-rosa-logo.png" alt="Sub Rosa" />

@@ -36,6 +36,10 @@ export function isSubmissionAlreadyRevealed(error: unknown): boolean {
   return hasContractError(error, 32, "AlreadyRevealed");
 }
 
+export function isRevealStillOpen(error: unknown): boolean {
+  return hasContractError(error, 16, "RevealStillOpen");
+}
+
 export function isTxBadSeqError(error: unknown): boolean {
   const message = errorMessage(error);
   return (
