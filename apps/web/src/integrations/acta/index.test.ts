@@ -53,6 +53,28 @@ test("maps ACTA status, type, subject, and trusted issuer into eligibility", () 
   assert.equal(JSON.stringify(result).includes("privateClaim"), false);
 });
 
+test("prefers ACTA's normalized vc over a sibling raw contract result", () => {
+  const result = evaluateActaEligibility({
+    policy: { credentialType: "SkillBadgeCredential", trustedIssuerDid: ISSUER },
+    owner: `G${"D".repeat(55)}`,
+    credentialId: "vc-skill-badge",
+    status: "valid",
+    credential: {
+      result: { ledger: 42, value: "raw-contract-result" },
+      vc: JSON.stringify({
+        "@context": ["https://www.w3.org/2018/credentials/v1"],
+        type: ["VerifiableCredential", "SkillBadgeCredential"],
+        issuer: ISSUER,
+        credentialSubject: { id: SUBJECT },
+      }),
+    },
+  });
+
+  assert.equal(result.state, "eligible");
+  assert.equal(result.issuerDid, ISSUER);
+  assert.equal(result.subjectDid, SUBJECT);
+});
+
 test("rejects an otherwise valid credential from an untrusted issuer", () => {
   const result = evaluateActaEligibility({
     policy: { credentialType: "VerifiedProviderCredential", trustedIssuerDid: ISSUER },

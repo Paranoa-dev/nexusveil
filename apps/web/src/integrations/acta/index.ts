@@ -103,7 +103,10 @@ function unwrapCredential(value: unknown): Record<string, unknown> | null {
   const parsed = parseJsonValue(value);
   const record = asRecord(parsed);
   if (!record) return null;
-  for (const key of ["result", "vc", "credential", "vcData"]) {
+
+  // ACTA may return both a normalized `vc` and a low-level `result` in the
+  // same response. The SDK explicitly treats `vc` as authoritative.
+  for (const key of ["vc", "credential", "vcData", "result"]) {
     if (key in record) {
       const nested = unwrapCredential(record[key]);
       if (nested) return nested;
