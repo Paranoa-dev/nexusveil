@@ -71,6 +71,19 @@ export function defaultActaProposalDraft(): ActaProposalDraft {
   };
 }
 
+export function fillEmptyActaProposalDraft(
+  draft: ActaProposalDraft,
+  defaults = defaultActaProposalDraft(),
+): ActaProposalDraft {
+  return {
+    providerName: draft.providerName.trim() ? draft.providerName : defaults.providerName,
+    proposedPrice: draft.proposedPrice.trim() ? draft.proposedPrice : defaults.proposedPrice,
+    deliveryDays: draft.deliveryDays.trim() ? draft.deliveryDays : defaults.deliveryDays,
+    proposal: draft.proposal.trim() ? draft.proposal : defaults.proposal,
+    experience: draft.experience.trim() ? draft.experience : defaults.experience,
+  };
+}
+
 export function defaultActaPilotWorkspace(now = Date.now()): ActaPilotWorkspace {
   return {
     mode: "demo",

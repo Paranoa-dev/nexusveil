@@ -8,6 +8,7 @@ import {
   buildActaRoundParams,
   canSubmitActaProposal,
   defaultActaPilotWorkspace,
+  fillEmptyActaProposalDraft,
   hiddenActaProposalRows,
   parseActaPilotWorkspace,
   selectActaProvider,
@@ -15,6 +16,22 @@ import {
 } from "./actaPilot.js";
 
 const WALLET = `G${"A".repeat(55)}`;
+
+test("successful verification can fill blank proposal fields without replacing user input", () => {
+  const filled = fillEmptyActaProposalDraft({
+    providerName: "My Studio",
+    proposedPrice: "",
+    deliveryDays: "  ",
+    proposal: "My custom approach",
+    experience: "",
+  });
+
+  assert.equal(filled.providerName, "My Studio");
+  assert.equal(filled.proposal, "My custom approach");
+  assert.equal(filled.proposedPrice, "1800");
+  assert.equal(filled.deliveryDays, "24");
+  assert.match(filled.experience, /Stellar integrations/);
+});
 
 test("ACTA pilot maps rounds through the SDK ReceiptOnly template", () => {
   const round = buildActaRoundParams({

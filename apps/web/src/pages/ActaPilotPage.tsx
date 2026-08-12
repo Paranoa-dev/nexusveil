@@ -63,6 +63,7 @@ import {
   canSubmitActaProposal,
   defaultActaPilotWorkspace,
   defaultActaProposalDraft,
+  fillEmptyActaProposalDraft,
   hiddenActaProposalRows,
   parseActaPilotWorkspace,
   sealedActaProposal,
@@ -342,7 +343,11 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
         message: "Demo credential accepted by the local demo policy.",
         source: "demo",
       };
-      setWorkspace((current) => ({ ...current, eligibility: demo }));
+      setWorkspace((current) => ({
+        ...current,
+        eligibility: demo,
+        proposalDraft: fillEmptyActaProposalDraft(current.proposalDraft),
+      }));
       toast.push("success", "Demo eligibility granted", "No ACTA API or credential was used.");
       return;
     }
@@ -365,7 +370,13 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
         owner: workspace.credentialOwner,
         credentialId: workspace.credentialId,
       });
-      setWorkspace((current) => ({ ...current, eligibility: result }));
+      setWorkspace((current) => ({
+        ...current,
+        eligibility: result,
+        proposalDraft: result.state === "eligible"
+          ? fillEmptyActaProposalDraft(current.proposalDraft)
+          : current.proposalDraft,
+      }));
       toast.push(result.state === "eligible" ? "success" : "error", statusLabel(result), result.message);
     } catch (error) {
       setWorkspace((current) => ({
