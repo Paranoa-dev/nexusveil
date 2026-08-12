@@ -58,8 +58,9 @@ export interface ActaPilotWorkspace {
 }
 
 export const ACTA_PILOT_STORAGE_KEY = "subrosa-acta-pilot-v1";
-export const ACTA_DEFAULT_CREDENTIAL_TYPE = "VerifiedProviderCredential";
+export const ACTA_DEFAULT_CREDENTIAL_TYPE = "SkillBadgeCredential";
 export const ACTA_DEFAULT_TRUSTED_ISSUER_DID = "did:stellar:testnet:sd2tszkfg2t7on3clzr3zqlhea";
+export const ACTA_DEFAULT_CREDENTIAL_ID = "vc-35c42a40-f5cd-477d-82c9-f2b562ea31ab";
 
 export function defaultActaProposalDraft(): ActaProposalDraft {
   return {
@@ -100,7 +101,7 @@ export function defaultActaPilotWorkspace(now = Date.now()): ActaPilotWorkspace 
     organizerWallet: null,
     deadlineAt: now + 120_000,
     credentialOwner: "",
-    credentialId: "",
+    credentialId: ACTA_DEFAULT_CREDENTIAL_ID,
     eligibility: null,
     proposalDraft: defaultActaProposalDraft(),
     demoProposals: [],
@@ -129,10 +130,14 @@ export function parseActaPilotWorkspace(value: string): ActaPilotWorkspace {
     : null;
   const policy = { ...fallback.policy, ...(parsed.policy ?? {}) };
   if (!policy.trustedIssuerDid.trim()) policy.trustedIssuerDid = fallback.policy.trustedIssuerDid;
+  if (!policy.credentialType.trim() || policy.credentialType === "VerifiedProviderCredential") {
+    policy.credentialType = fallback.policy.credentialType;
+  }
   return {
     ...fallback,
     ...parsed,
     policy,
+    credentialId: parsed.credentialId?.trim() || fallback.credentialId,
     proposalDraft: { ...fallback.proposalDraft, ...(parsed.proposalDraft ?? {}) },
     demoProposals: Array.isArray(parsed.demoProposals) ? parsed.demoProposals : [],
     transactionHashes: Array.isArray(parsed.transactionHashes) ? parsed.transactionHashes : [],

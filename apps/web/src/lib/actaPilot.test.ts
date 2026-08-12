@@ -4,6 +4,7 @@ import test from "node:test";
 import { SEALED_PROPOSAL_SCHEMA_REF } from "@sub-rosa/sdk";
 
 import {
+  ACTA_DEFAULT_CREDENTIAL_ID,
   actaProposalFromDraft,
   buildActaRoundParams,
   canSubmitActaProposal,
@@ -16,6 +17,22 @@ import {
 } from "./actaPilot.js";
 
 const WALLET = `G${"A".repeat(55)}`;
+
+test("ACTA pilot starts with the live Skill Badge credential preset", () => {
+  const workspace = defaultActaPilotWorkspace();
+  assert.equal(workspace.policy.credentialType, "SkillBadgeCredential");
+  assert.equal(workspace.policy.trustedIssuerDid, "did:stellar:testnet:sd2tszkfg2t7on3clzr3zqlhea");
+  assert.equal(workspace.credentialId, ACTA_DEFAULT_CREDENTIAL_ID);
+});
+
+test("stored legacy ACTA policy migrates to the pilot preset", () => {
+  const workspace = defaultActaPilotWorkspace();
+  workspace.policy.credentialType = "VerifiedProviderCredential";
+  workspace.credentialId = "";
+  const restored = parseActaPilotWorkspace(JSON.stringify(workspace));
+  assert.equal(restored.policy.credentialType, "SkillBadgeCredential");
+  assert.equal(restored.credentialId, ACTA_DEFAULT_CREDENTIAL_ID);
+});
 
 test("successful verification can fill blank proposal fields without replacing user input", () => {
   const filled = fillEmptyActaProposalDraft({

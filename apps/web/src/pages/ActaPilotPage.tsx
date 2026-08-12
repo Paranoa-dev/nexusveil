@@ -238,8 +238,12 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
   }, [workspace.mode, workspace.roundId, reader]);
 
   useEffect(() => {
-    if (!address || workspace.credentialOwner) return;
-    setWorkspace((current) => ({ ...current, credentialOwner: address }));
+    if (!address || workspace.credentialOwner === address) return;
+    setWorkspace((current) => ({
+      ...current,
+      credentialOwner: address,
+      eligibility: current.eligibility?.owner === address ? current.eligibility : null,
+    }));
   }, [address, workspace.credentialOwner]);
 
   const actaBaseUrl = import.meta.env.VITE_ACTA_BASE_URL ?? ACTA_TESTNET_BASE_URL;
@@ -713,7 +717,7 @@ export function ActaPilotPage({ goHome }: ActaPilotPageProps) {
     setLiveProposals([]);
     setReceipt(null);
     setReceiptVerified(null);
-    setApiKey("");
+    setApiKey(configuredApiKey);
     window.location.hash = "#/pilot/acta";
   }
 
