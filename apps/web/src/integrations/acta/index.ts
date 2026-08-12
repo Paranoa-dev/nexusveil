@@ -99,20 +99,36 @@ function parseJsonValue(value: unknown): unknown {
   }
 }
 
-function unwrapCredential(value: unknown): Record<string, unknown> | null {
+function isCredentialRecord(value: Record<string, unknown>): boolean {
+  const types = value.type;
+  return "credentialSubject" in value && (
+    typeof types === "string" ||
+    (Array.isArray(types) && types.some((entry) => typeof entry === "string"))
+  );
+}
+
+function unwrapCredential(value: unknown, depth = 0): Record<string, unknown> | null {
+  if (depth > 8) return null;
   const parsed = parseJsonValue(value);
   const record = asRecord(parsed);
   if (!record) return null;
+  if (isCredentialRecord(record)) return record;
 
   // ACTA may return both a normalized `vc` and a low-level `result` in the
   // same response. The SDK explicitly treats `vc` as authoritative.
-  for (const key of ["vc", "credential", "vcData", "result"]) {
+  const envelopeKeys = ["vc", "credential", "vcData", "vc_data", "data", "payload", "value", "result"];
+  for (const key of envelopeKeys) {
     if (key in record) {
-      const nested = unwrapCredential(record[key]);
+      const nested = unwrapCredential(record[key], depth + 1);
       if (nested) return nested;
     }
   }
-  return record;
+
+  for (const nestedValue of Object.values(record)) {
+    const nested = unwrapCredential(nestedValue, depth + 1);
+    if (nested) return nested;
+  }
+  return null;
 }
 
 function issuerDidFromCredential(credential: Record<string, unknown>): string | null {
@@ -136,12 +152,37 @@ function subjectDidFromCredential(credential: Record<string, unknown>): string |
   return typeof subject?.id === "string" ? subject.id : null;
 }
 
-function statusFromResponse(value: unknown): ActaCredentialStatus {
-  const record = asRecord(value);
-  const status = record?.status;
-  return status === "valid" || status === "revoked" || status === "invalid"
-    ? status
-    : "unknown";
+function statusFromResponse(value: unknown, depth = 0): ActaCredentialStatus {
+  if (depth > 8) return "unknown";
+  const parsed = parseJsonValue(value);
+  if (typeof parsed === "string") {
+    const normalized = parsed.trim().toLowerCase();
+    if (normalized === "valid" || normalized === "revoked" || normalized === "invalid") {
+      return normalized;
+    }
+    return "unknown";
+  }
+  if (Array.isArray(parsed)) {
+    for (const entry of parsed) {
+      const status = statusFromResponse(entry, depth + 1);
+      if (status !== "unknown") return status;
+    }
+    return "unknown";
+  }
+  const record = asRecord(parsed);
+  if (!record) return "unknown";
+
+  for (const key of ["status", "result", "value", "data"]) {
+    if (key in record) {
+      const status = statusFromResponse(record[key], depth + 1);
+      if (status !== "unknown") return status;
+    }
+  }
+  for (const key of Object.keys(record)) {
+    const status = statusFromResponse(key, depth + 1);
+    if (status !== "unknown") return status;
+  }
+  return "unknown";
 }
 
 export function isValidActaIssuerDid(value: string, network?: "testnet" | "mainnet"): boolean {
@@ -180,6 +221,13 @@ export function evaluateActaEligibility(params: {
     source: params.source ?? "real",
   } as const;
 
+  if (params.status === "unknown") {
+    return {
+      ...base,
+      state: "verification_failed",
+      message: "ACTA returned an unrecognized credential verification status.",
+    };
+  }
   if (params.status !== "valid") {
     return {
       ...base,

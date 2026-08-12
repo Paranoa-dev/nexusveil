@@ -75,6 +75,67 @@ test("prefers ACTA's normalized vc over a sibling raw contract result", () => {
   assert.equal(result.subjectDid, SUBJECT);
 });
 
+test("finds a W3C credential inside nested ACTA response envelopes", () => {
+  const result = evaluateActaEligibility({
+    policy: { credentialType: "SkillBadgeCredential", trustedIssuerDid: ISSUER },
+    owner: `G${"D".repeat(55)}`,
+    credentialId: "vc-skill-badge",
+    status: "valid",
+    credential: {
+      vc: {
+        data: {
+          vc_data: JSON.stringify({
+            type: ["VerifiableCredential", "SkillBadgeCredential"],
+            issuer: ISSUER,
+            credentialSubject: { id: SUBJECT },
+          }),
+        },
+      },
+      result: { ledger: 42 },
+    },
+  });
+
+  assert.equal(result.state, "eligible");
+});
+
+test("reports an unknown ACTA status as a verification failure", () => {
+  const result = evaluateActaEligibility({
+    policy: { credentialType: "SkillBadgeCredential", trustedIssuerDid: ISSUER },
+    owner: `G${"D".repeat(55)}`,
+    credentialId: "vc-skill-badge",
+    status: "unknown",
+    credential: null,
+  });
+
+  assert.equal(result.state, "verification_failed");
+  assert.match(result.message, /unrecognized/);
+});
+
+test("adapter accepts nested and enum-cased ACTA verification statuses", async () => {
+  for (const statusResponse of [
+    "Valid",
+    { result: "Valid" },
+    { data: { status: "VALID" } },
+    { result: { Valid: [] } },
+  ]) {
+    const adapter = new ActaAdapter({
+      apiKey: "runtime-key",
+      client: {
+        vaultVerify: async () => statusResponse,
+        vaultGetVcDirect: async () => credential(),
+        getIssuerIdentity: async () => null,
+        getOrCreateIssuerIdentity: async () => ({ did: ISSUER }),
+      },
+    });
+    const result = await adapter.verifyEligibility({
+      policy: { credentialType: "VerifiedProviderCredential", trustedIssuerDid: ISSUER },
+      owner: `G${"D".repeat(55)}`,
+      credentialId: "provider-credential",
+    });
+    assert.equal(result.state, "eligible");
+  }
+});
+
 test("rejects an otherwise valid credential from an untrusted issuer", () => {
   const result = evaluateActaEligibility({
     policy: { credentialType: "VerifiedProviderCredential", trustedIssuerDid: ISSUER },
