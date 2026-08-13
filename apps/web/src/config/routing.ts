@@ -12,6 +12,7 @@ export type Page =
   | "trustlessWorkPilot"
   | "offerHubPilot"
   | "actaPilot"
+  | "openX402Pilot"
   | "docs";
 
 export interface RouteState {
@@ -44,6 +45,9 @@ export function routeFromHash(source = window.location.hash): RouteState {
     }
     if (parts[1] === "acta") {
       return { page: "actaPilot", useCase: "auction" };
+    }
+    if (parts[1] === "openx402") {
+      return { page: "openX402Pilot", useCase: "auction" };
     }
     if (parts[1] === "basic" || /^\d+$/.test(parts[1] ?? "")) {
       return { page: "basicPilot", useCase: "auction" };
@@ -79,6 +83,7 @@ export function hashFor(page: Page, useCase: UseCaseId = "auction"): string {
   if (page === "trustlessWorkPilot") return "#/pilot/trustless-work";
   if (page === "offerHubPilot") return "#/pilot/offer-hub";
   if (page === "actaPilot") return "#/pilot/acta";
+  if (page === "openX402Pilot") return "#/pilot/openx402";
   if (page === "docs") return "#/docs";
   return `#/demo/${useCase}`;
 }
@@ -100,6 +105,13 @@ export function offerHubPilotRoundIdFromHash(source = window.location.hash): str
 export function actaPilotRoundIdFromHash(source = window.location.hash): string {
   const parts = source.replace(/^#\/?/, "").split("/").filter(Boolean);
   return parts[0] === "pilot" && parts[1] === "acta" && /^\d+$/.test(parts[2] ?? "")
+    ? parts[2]
+    : "";
+}
+
+export function openX402PilotRoundIdFromHash(source = window.location.hash): string {
+  const parts = source.replace(/^#\/?/, "").split("/").filter(Boolean);
+  return parts[0] === "pilot" && parts[1] === "openx402" && /^\d+$/.test(parts[2] ?? "")
     ? parts[2]
     : "";
 }

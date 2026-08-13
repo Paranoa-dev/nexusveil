@@ -36,6 +36,11 @@ The [Offer-Hub pilot workflow](./pilots/OFFER_HUB_PILOT.md) is the reference
 standalone implementation for this track. It keeps marketplace selection and
 payment outside Sub Rosa while exercising the real `ReceiptOnly` lifecycle.
 
+The [OpenX402 pilot](./pilots/OPENX402_PILOT.md) applies the same boundary to
+agent services: fixture-backed discovery, resource-bound sealed offers,
+application selection, and a typed payment handoff that remains blocked until
+OpenX402 confirms how a selected competitive quote becomes the actual charge.
+
 ## Economic auction pilot
 
 Use this track for a marketplace, asset issuer, game, collectible, or other

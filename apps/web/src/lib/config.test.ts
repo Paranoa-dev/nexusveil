@@ -162,6 +162,16 @@ test("legacy v1 mainnet proof is not accepted as a Core v2 web deployment", () =
   assert.ok(issues.some((issue) => issue.message.includes("legacy v1")));
 });
 
+test("pre-partner-policy testnet deployment is rejected", () => {
+  const issues = validatePublicConfig({
+    VITE_RPC_URL: "https://soroban-testnet.stellar.org",
+    VITE_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
+    VITE_CONTRACT_ID: "CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P",
+  });
+  assert.ok(issues.some((issue) =>
+    issue.key === "VITE_CONTRACT_ID" && issue.message.includes("create_partner_round_v2")
+  ));
+});
 
 // --- URL normalization regression tests ---
 

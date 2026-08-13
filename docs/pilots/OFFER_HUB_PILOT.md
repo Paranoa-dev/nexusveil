@@ -88,11 +88,10 @@ Live mode uses real configured Sub Rosa infrastructure:
 - live proposal form plaintext is intentionally excluded from workspace
   `localStorage`; refreshing before submission discards that draft.
 
-The configured `CCZBS...YN4P` testnet deployment predates the optional partner
-policy entrypoints. This pilot requires open participation and therefore creates
-its Core v2 `ReceiptOnly` round directly through `create_round_v2`, with zero
-escrow and no allowlist. Receipt export records `policy.enforced=false` because
-this deployment has no `get_round_policy_v2` view.
+The canonical testnet deployment exposes the Core v2 partner-policy entrypoints.
+This pilot creates an open-participation `ReceiptOnly` round with zero escrow
+and no allowlist through the shared SDK template. Receipt export records the
+enforced partner policy without assigning an economic winner.
 
 The pilot is not connected to Offer-Hub APIs, databases, subscriptions,
 payments, or production UI. Separate wallets or browsers are required to act
@@ -107,7 +106,7 @@ Live mode uses the normal web configuration in `apps/web/.env.local`:
 VITE_STELLAR_NETWORK=testnet
 VITE_RPC_URL=https://soroban-testnet.stellar.org
 VITE_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
-VITE_CONTRACT_ID=CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P
+VITE_CONTRACT_ID=CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV
 ```
 
 Freighter must be installed, unlocked, and set to the same network. The wallet

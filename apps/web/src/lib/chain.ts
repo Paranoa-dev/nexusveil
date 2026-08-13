@@ -69,6 +69,9 @@ export function displayError(error: unknown): string {
   if (message.includes("trustline entry is missing")) {
     return "Wallet is missing the escrow asset trustline. Fund the testnet wallet or use the XLM demo contract.";
   }
+  if (message.includes("trying to invoke non-existent contract function")) {
+    return "The configured contract does not support this Core v2 function. Update VITE_CONTRACT_ID to the reviewed deployment for the selected network and restart the web app.";
+  }
   return message;
 }
 
@@ -145,6 +148,43 @@ export function useReadOnlySdk() {
       rpcUrl: RPC_URL,
     });
   }, []);
+}
+
+export function useWalletSdk(address: string | null) {
+  return useMemo(() => {
+    if (!address || !CONTRACT_ID) return null;
+    return new SubRosaClient({
+      contractId: CONTRACT_ID,
+      networkPassphrase: NETWORK,
+      rpcUrl: RPC_URL,
+      publicKey: address,
+      signTransaction: async (xdr: string, opts?: { networkPassphrase?: string; address?: string }) => {
+        const signed = await signTransaction(xdr, {
+          networkPassphrase: opts?.networkPassphrase ?? NETWORK,
+          address: opts?.address ?? address,
+        });
+        const error = freighterError(signed);
+        if (error) throw new Error(error);
+        return {
+          signedTxXdr: signed.signedTxXdr,
+          signerAddress: signed.signerAddress,
+        };
+      },
+      signAuthEntry: async (entryXdr: string, opts?: { networkPassphrase?: string; address?: string }) => {
+        const signed = await signAuthEntry(entryXdr, {
+          networkPassphrase: opts?.networkPassphrase ?? NETWORK,
+          address: opts?.address ?? address,
+        });
+        const error = freighterError(signed);
+        if (error) throw new Error(error);
+        if (!signed.signedAuthEntry) throw new Error("Freighter returned no signed auth entry");
+        return {
+          signedAuthEntry: signed.signedAuthEntry,
+          signerAddress: signed.signerAddress,
+        };
+      },
+    });
+  }, [address]);
 }
 
 export async function resolveFreighterAddress(

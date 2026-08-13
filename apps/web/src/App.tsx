@@ -14,6 +14,7 @@ import { SignalPilotPage } from "./pages/SignalPilotPage";
 import { TrustlessWorkPilotPage } from "./pages/TrustlessWorkPilotPage";
 import { OfferHubPilotPage } from "./pages/OfferHubPilotPage";
 import { ActaPilotPage } from "./pages/ActaPilotPage";
+import { OpenX402PilotPage } from "./pages/OpenX402PilotPage";
 import { ToastProvider } from "./ui/Toast";
 
 export default function App() {
@@ -53,6 +54,8 @@ export default function App() {
         <OfferHubPilotPage goHome={() => navigate("landing")} />
       ) : route.page === "actaPilot" ? (
         <ActaPilotPage goHome={() => navigate("landing")} />
+      ) : route.page === "openX402Pilot" ? (
+        <OpenX402PilotPage goHome={() => navigate("landing")} />
       ) : route.page === "docs" ? (
         <DocsPage goHome={() => navigate("landing")} />
       ) : (

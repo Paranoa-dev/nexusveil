@@ -5,6 +5,7 @@ import {
   actaPilotRoundIdFromHash,
   hashFor,
   offerHubPilotRoundIdFromHash,
+  openX402PilotRoundIdFromHash,
   pilotRoundIdFromHash,
   routeFromHash,
   trustlessWorkPilotRoundIdFromHash,
@@ -39,6 +40,10 @@ test("pilot routes open the partner workspace", () => {
     page: "actaPilot",
     useCase: "auction",
   });
+  assert.deepEqual(routeFromHash("#/pilot/openx402"), {
+    page: "openX402Pilot",
+    useCase: "auction",
+  });
 });
 
 test("pilot round links accept only numeric round ids", () => {
@@ -55,6 +60,13 @@ test("pilot navigation emits the canonical workspace hash", () => {
   assert.equal(hashFor("trustlessWorkPilot"), "#/pilot/trustless-work");
   assert.equal(hashFor("offerHubPilot"), "#/pilot/offer-hub");
   assert.equal(hashFor("actaPilot"), "#/pilot/acta");
+  assert.equal(hashFor("openX402Pilot"), "#/pilot/openx402");
+});
+
+test("OpenX402 pilot round links accept only numeric round ids", () => {
+  assert.equal(openX402PilotRoundIdFromHash("#/pilot/openx402/42"), "42");
+  assert.equal(openX402PilotRoundIdFromHash("#pilot/openx402/0007"), "0007");
+  assert.equal(openX402PilotRoundIdFromHash("#/pilot/openx402/not-a-round"), "");
 });
 
 test("ACTA pilot round links accept only numeric round ids", () => {

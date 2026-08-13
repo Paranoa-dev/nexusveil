@@ -194,7 +194,7 @@ Sub Rosa Live mode uses the normal web testnet configuration:
 VITE_STELLAR_NETWORK=testnet
 VITE_RPC_URL=https://soroban-testnet.stellar.org
 VITE_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
-VITE_CONTRACT_ID=CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P
+VITE_CONTRACT_ID=CCOVGOQQZJKZ2R55GRWBLTJTGBAMSHXZVN3ICPG3WRVMLMM6RHISC5OV
 ```
 
 ACTA defaults to `https://api.testnet.acta.build`. A custom documented ACTA

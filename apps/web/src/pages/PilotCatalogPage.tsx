@@ -59,10 +59,11 @@ const PILOTS = [
     eyebrow: "Agent bidding",
     title: "OpenX402",
     description: "Add lightweight sealed bidding between MCP discovery and x402 payment for competitive agent requests.",
-    meta: "MCP · X402",
+    meta: "ReceiptOnly · X402",
     logo: "/pilots/openx402/openx402-logo.jpg",
+    href: "#/pilot/openx402",
     className: "openx402",
-    status: "comingSoon",
+    status: "live",
   },
 ] as const;
 

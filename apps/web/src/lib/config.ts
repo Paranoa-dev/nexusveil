@@ -17,6 +17,8 @@ const CRITICAL_KEYS = [
 
 const LEGACY_V1_MAINNET_CONTRACT =
   "CA7KSDEYJEPGZEB2ZROTLUWKQQ6GIRIQNGG6Z745MZ34QHP4UJPWODEX";
+const PRE_PARTNER_POLICY_TESTNET_CONTRACT =
+  "CCZBS4N2CHRDIFRTPBVQHAH5JJLPZIXLG7EY3T7KP7Z6YERTUCBMYN4P";
 
 export interface PublicNetworkConfig {
   network: SubRosaNetwork;
@@ -77,6 +79,13 @@ export function validatePublicConfig(
         message: "The configured mainnet contract is the legacy v1 proof, not a Core v2 deployment.",
       });
     }
+  }
+
+  if (env.VITE_CONTRACT_ID?.trim() === PRE_PARTNER_POLICY_TESTNET_CONTRACT) {
+    issues.push({
+      key: "VITE_CONTRACT_ID",
+      message: "The configured testnet contract predates the Core v2 partner-policy interface and does not expose create_partner_round_v2.",
+    });
   }
 
   for (const key of namedNetwork ? [] : CRITICAL_KEYS) {

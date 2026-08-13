@@ -139,8 +139,24 @@ that Offer-Hub has deployed a production integration. See
   public Core v2 contracts, SDK integration, receipts, and a runnable pilot.
 - **The Signal:** early pilot and validation partner for the standalone
   confidential OTC and loan deal-flow pilot above.
-- **Open x402 / Ithaca Labs:** integration work is being explored around sealed
+- **OpenX402 / Ithaca Labs:** integration work is being explored around sealed
   provider bidding between MCP discovery and x402 payment.
+
+## OpenX402 sealed agent-bidding pilot
+
+Local route: `#/pilot/openx402`
+
+The pilot adds a lightweight `ReceiptOnly` competition between fixture-backed,
+clearly labeled OpenX402-style discovery and a typed x402 payment handoff.
+Providers bind private offers to discovered resource digests; after reveal, the
+application validates the offers against the buyer's spending cap and selects
+the lowest valid quote. Sub Rosa records no economic winner and moves no
+payment asset.
+
+The OpenX402 selected-quote-to-payment interface is not yet implemented or
+invented. The workspace stops at `OpenX402 pricing interface confirmation
+required` and shows no fake payment receipt. See
+[the pilot boundary and open questions](./docs/pilots/OPENX402_PILOT.md).
 
 These statements describe the current validation scope. They do not imply that
 partner production codebases, private databases, or payment rails have been
