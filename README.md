@@ -2,7 +2,7 @@
   <img src="./assets/sub-rosa-readme.png" width="250" alt="Sub Rosa logo" />
 </p>
 
-# Sub Rosa
+# NexusVeil
 
 **Embeddable sealed-market infrastructure for Stellar.** Sub Rosa lets an
 application collect private bids or proposals, reveal them at a publicly
