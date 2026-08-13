@@ -115,6 +115,13 @@ response target, terms, and validity deadline. After reveal the application
 rejects an offer if its discovered resource is missing or changed, or if its
 network, asset, payee, amount, or freshness fails validation.
 
+Committed bidder addresses and the participation count are public contract
+state. Quote amounts and service terms remain private until their envelopes are
+revealed. Once all envelopes are revealed, application-level validation and
+selection can proceed immediately; it does not wait for `ReceiptOnly`
+finalization. The later `clear_v2` call closes the contract reveal window and
+produces the canonical receipt.
+
 ## Payment Integration
 
 The repository contains an isolated `OpenX402PaymentAdapter` with conceptual

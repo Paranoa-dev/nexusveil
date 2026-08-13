@@ -340,6 +340,48 @@
   line-height: 1.5;
 }
 
+.openx402-participants {
+  display: grid;
+  gap: 10px;
+  margin: 0 18px 14px;
+  padding: 13px 15px;
+  border: 1px solid var(--line-1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.openx402-participants > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.openx402-participants > div:first-child span,
+.openx402-participants p {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.openx402-participants > div:nth-child(2) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.openx402-participants code {
+  padding: 6px 8px;
+  border: 1px solid rgba(71, 179, 157, 0.3);
+  border-radius: 5px;
+  color: #a9e4d5;
+  font-size: 0.7rem;
+}
+
+.openx402-participants p {
+  margin: 0;
+  line-height: 1.5;
+}
+
 .openx402-offer-head {
   display: flex;
   align-items: flex-start;

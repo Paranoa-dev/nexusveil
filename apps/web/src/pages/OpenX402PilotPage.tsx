@@ -79,7 +79,7 @@ const OPENX402_COMMIT_DURATIONS = [
   { seconds: 300, label: "5 min" },
 ] as const;
 const REVEAL_DELAY_SECONDS = 10;
-const REVEAL_WINDOW_SECONDS = 240;
+const REVEAL_WINDOW_SECONDS = 120;
 const SUBMIT_STAGE_LABELS: Record<SubmitStage, string> = {
   idle: "Submit sealed offer",
   checking: "Checking round...",
@@ -188,8 +188,12 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
   const selected = workspace.selectedResourceId
     ? evaluated.evaluated.find((offer) => offer.resourceId === workspace.selectedResourceId) ?? null
     : null;
-  const revealedCount = offers.length;
-  const roundFinal = workspace.mode === "demo" ? workspace.revealComplete : round?.status.tag === "Settled";
+  const revealedCount = workspace.mode === "demo" && !workspace.revealComplete ? 0 : offers.length;
+  const offersVisible = revealedCount > 0;
+  const allOffersRevealed = workspace.mode === "demo"
+    ? workspace.revealComplete
+    : workspace.sealedOfferCount > 0 && revealedCount === workspace.sealedOfferCount;
+  const roundFinalized = workspace.mode === "demo" ? workspace.revealComplete : round?.status.tag === "Settled";
   const hasStartedRound = workspace.mode === "live" ? Boolean(workspace.roundId) : Boolean(workspace.deadlineAt);
   const liveOfferWindowOpen = Boolean(
     round?.status.tag === "Open" && now < Number(round.commit_deadline) * 1000,
@@ -366,15 +370,16 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
       }
     }
     if (generation !== liveReadGeneration.current) return;
-    setRound(nextRound);
+    const revealComplete = bidders.length > 0 && revealed.length === bidders.length;
+    setRound({ ...nextRound, bidders });
     setOffers(revealed);
     setWorkspace((current) => ({
       ...current,
       roundId: target,
       deadlineAt: Number(nextRound.commit_deadline) * 1000,
       sealedOfferCount: bidders.length,
-      revealComplete: nextRound.status.tag === "Settled",
-      revealedOffers: nextRound.status.tag === "Settled" ? revealed : [],
+      revealComplete,
+      revealedOffers: revealComplete ? revealed : [],
     }));
   }
 
@@ -525,6 +530,7 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
       if (!walletSdk || !round || !workspace.roundId) throw new Error("Load a live round and connect a keeper wallet first");
       const rid = BigInt(workspace.roundId);
       let current = await walletSdk.getRoundV2(rid);
+      let finalized = false;
       if (current.status.tag === "Open") {
         if (!countdown.published) throw new Error("Drand reveal round has not published yet");
         const signature = await fetchRoundSignature(quicknet(), Number(current.reveal_round));
@@ -547,14 +553,21 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
         if (Math.floor(Date.now() / 1000) > Number(current.reveal_deadline)) {
           preflightMessage(await walletSdk.preflightClearV2(rid));
           await walletSdk.clearV2(rid);
+          finalized = true;
         }
       }
       setWorkspace((state) => ({
         ...state,
         transactionHashes: Array.from(new Set([...state.transactionHashes, ...walletSdk.submittedTransactionHashes])),
       }));
-      await refreshLive();
-      toast.push("success", "Reveal lifecycle advanced", current.status.tag === "Revealing" ? "Offers revealed; finalize after the reveal window closes" : "ReceiptOnly round finalized");
+      await refreshLiveWithRetry(workspace.roundId);
+      toast.push(
+        "success",
+        finalized ? "ReceiptOnly round finalized" : "Offers revealed",
+        finalized
+          ? "The canonical receipt is now available"
+          : "Revealed quotes are now public and application selection can proceed before finalization",
+      );
     } catch (error) {
       toast.push("error", "Reveal failed", displayError(error));
     } finally {
@@ -566,7 +579,7 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
     if (selectionGuard.current) return;
     selectionGuard.current = true;
     try {
-      if (!roundFinal) throw new Error("Finalize the ReceiptOnly reveal before selection");
+      if (!allOffersRevealed) throw new Error("Wait until every sealed offer has been revealed before selection");
       if (!evaluated.selected) throw new Error("No valid revealed offer is within the buyer allowance");
       setWorkspace((current) => ({ ...current, selectedResourceId: evaluated.selected!.resourceId }));
       setHandoff(null);
@@ -695,7 +708,7 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
   const flow = [
     { label: "Discover", done: workspace.discoveryComplete },
     { label: "Seal offers", done: workspace.sealedOfferCount > 0 },
-    { label: "Reveal", done: Boolean(roundFinal) },
+    { label: "Reveal", done: allOffersRevealed },
     { label: "Select", done: Boolean(selected) },
     { label: "Pay", done: handoff?.status === "ready_for_external_execution" },
   ];
@@ -704,7 +717,9 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
     : round?.status.tag === "Open" && Math.floor(now / 1000) > Number(round.reveal_deadline)
       ? "Reveal window expired"
     : round?.status.tag === "Revealing" && Math.floor(now / 1000) <= Number(round.reveal_deadline)
-      ? "Offers revealed - await finalize"
+      ? allOffersRevealed ? "Offers visible - await finalize" : "Reveal remaining offers"
+    : round?.status.tag === "Revealing"
+      ? "Finalize ReceiptOnly"
       : round?.status.tag === "Settled" ? "Reveal finalized" : countdown.published ? "Open + reveal" : `Reveal in ${countdown.secondsRemaining}s`;
   const revealDisabled = busy !== null
     || (workspace.mode === "demo" && workspace.sealedOfferCount === 0)
@@ -713,6 +728,7 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
       || round.status.tag === "Settled"
       || (round.status.tag === "Open" && Math.floor(now / 1000) > Number(round.reveal_deadline))
       || (round.status.tag === "Open" && !countdown.published)
+      || (round.status.tag === "Revealing" && allOffersRevealed && Math.floor(now / 1000) <= Number(round.reveal_deadline))
     ));
 
   return (
@@ -772,11 +788,12 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
                 {workspace.mode === "live" && <div className="openx402-inline-form"><label>Existing round ID<input inputMode="numeric" value={roundInput} onChange={(event) => setRoundInput(event.target.value)} /></label><button type="button" className="secondary-action compact" onClick={loadRound} disabled={busy !== null || !roundInput}>Load round</button></div>}
                 {!hasStartedRound && <div className="openx402-duration-picker"><span>Offer window</span><div role="radiogroup" aria-label="Offer window duration">{OPENX402_COMMIT_DURATIONS.map((duration) => <button key={duration.seconds} type="button" role="radio" aria-checked={workspace.commitDurationSeconds === duration.seconds} className={workspace.commitDurationSeconds === duration.seconds ? "active" : ""} onClick={() => setWorkspace((current) => ({ ...current, commitDurationSeconds: duration.seconds }))} disabled={busy !== null}>{duration.label}</button>)}</div><small>Providers can commit sealed offers until this window closes. Reveal opens about 10 seconds later.</small></div>}
                 <div className="openx402-round-timer" aria-live="polite"><Hourglass size={18} /><div><span>{roundTimer.phase}</span><strong>{roundTimer.value}</strong></div>{workspace.roundId && <code>Round #{workspace.roundId}</code>}</div>
-                <div className="pilot-actions">{hasStartedRound ? <button type="button" className="primary-action compact" onClick={startNewRound} disabled={busy !== null}><RefreshCw size={15} />Start new round</button> : <button type="button" className="primary-action compact" onClick={createRound} disabled={busy !== null || !workspace.discoveryComplete}><LockKeyhole size={15} />{busy === "create" ? "Creating..." : workspace.mode === "live" ? "Create ReceiptOnly round" : "Seal sample offers"}</button>}<button type="button" className="secondary-action compact" onClick={advanceReveal} disabled={revealDisabled}><Sparkles size={15} />{busy === "reveal" ? "Advancing..." : revealLabel}</button><button type="button" className="secondary-action compact" onClick={applySelection} disabled={busy !== null || !roundFinal}><Gauge size={15} />Apply lowest valid policy</button></div>
+                <div className="pilot-actions">{hasStartedRound ? <button type="button" className="primary-action compact" onClick={startNewRound} disabled={busy !== null}><RefreshCw size={15} />Start new round</button> : <button type="button" className="primary-action compact" onClick={createRound} disabled={busy !== null || !workspace.discoveryComplete}><LockKeyhole size={15} />{busy === "create" ? "Creating..." : workspace.mode === "live" ? "Create ReceiptOnly round" : "Seal sample offers"}</button>}<button type="button" className="secondary-action compact" onClick={advanceReveal} disabled={revealDisabled}><Sparkles size={15} />{busy === "reveal" ? "Advancing..." : revealLabel}</button><button type="button" className="secondary-action compact" onClick={applySelection} disabled={busy !== null || !allOffersRevealed}><Gauge size={15} />Apply lowest valid policy</button></div>
               </section>
               <section className="pilot-result">
-                <div className="pilot-result-heading"><span>Sub Rosa reveal result</span><strong>{roundFinal ? `${revealedCount} revealed` : `${workspace.sealedOfferCount} sealed`}</strong></div>
-                {!roundFinal ? <div className="openx402-sealed-state"><LockKeyhole size={22} /><div><strong>Competitive values hidden</strong><p>The buyer can see participation, but not private quote amounts or service terms before the shared reveal completes.</p></div></div> : evaluated.evaluated.length ? <div className="openx402-offer-grid">{evaluated.evaluated.map((offer) => <OfferCard key={`${offer.bidder}:${offer.resourceId}`} offer={offer} selected={selected?.bidder === offer.bidder} />)}</div> : <div className="pilot-empty">No revealed offers could be decoded.</div>}
+                <div className="pilot-result-heading"><span>Sub Rosa reveal result</span><strong>{offersVisible ? `${revealedCount} revealed / ${workspace.sealedOfferCount} sealed` : `${workspace.sealedOfferCount} sealed`}</strong></div>
+                {workspace.mode === "live" && round && round.bidders.length > 0 && <div className="openx402-participants"><div><strong>Public participants</strong><span>{round.bidders.length} committed wallet{round.bidders.length === 1 ? "" : "s"}</span></div><div>{round.bidders.map((bidder, index) => <code key={bidder} title={bidder}>Offer {index + 1} · {short(bidder, 9)}</code>)}</div><p>Participation and bidder addresses are public. Quote amounts and service terms remain private until each envelope is revealed.</p></div>}
+                {!offersVisible ? <div className="openx402-sealed-state"><LockKeyhole size={22} /><div><strong>Competitive values hidden</strong><p>Participation is public, but quote amounts and service terms remain private until their sealed envelopes are revealed.</p></div></div> : evaluated.evaluated.length ? <><div className="openx402-offer-grid">{evaluated.evaluated.map((offer) => <OfferCard key={`${offer.bidder}:${offer.resourceId}`} offer={offer} selected={selected?.bidder === offer.bidder} />)}</div>{!allOffersRevealed && <p className="openx402-note">Opened offers are public. Waiting for {workspace.sealedOfferCount - revealedCount} remaining sealed offer{workspace.sealedOfferCount - revealedCount === 1 ? "" : "s"} before selection.</p>}</> : <div className="pilot-empty">No revealed offers could be decoded.</div>}
               </section>
               <section className="pilot-result openx402-handoff">
                 <div className="pilot-result-heading"><span>Application selection → payment</span><strong>{handoffStatus ? handoffStatus.replaceAll("_", " ").toUpperCase() : selected ? "HANDOFF READY" : "PENDING"}</strong></div>
@@ -805,7 +822,7 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
             </>}
 
             {workspace.view === "evidence" && <div className="openx402-evidence-grid">
-              <section className="pilot-result"><div className="pilot-result-heading"><span>Sub Rosa evidence</span><strong>{workspace.mode === "live" ? "REAL" : "DEMO"}</strong></div><dl className="pilot-facts"><div><dt>Round ID</dt><dd>{workspace.mode === "live" ? workspace.roundId ?? "Not created" : "No fabricated ID"}</dd></div><div><dt>Mode</dt><dd>ReceiptOnly</dd></div><div><dt>Sealed / revealed</dt><dd>{workspace.sealedOfferCount} / {roundFinal ? revealedCount : 0}</dd></div><div><dt>Protocol winner</dt><dd>None</dd></div><div><dt>Canonical receipt</dt><dd>{receipt ? receiptVerified ? "Verified" : "Invalid" : "Not exported"}</dd></div></dl>{workspace.mode === "live" && <div className="pilot-actions"><button type="button" className="secondary-action compact" onClick={downloadReceipt} disabled={busy !== null || round?.status.tag !== "Settled"}><FileCheck2 size={15} />Verify + download receipt</button></div>}</section>
+              <section className="pilot-result"><div className="pilot-result-heading"><span>Sub Rosa evidence</span><strong>{workspace.mode === "live" ? "REAL" : "DEMO"}</strong></div><dl className="pilot-facts"><div><dt>Round ID</dt><dd>{workspace.mode === "live" ? workspace.roundId ?? "Not created" : "No fabricated ID"}</dd></div><div><dt>Mode</dt><dd>ReceiptOnly</dd></div><div><dt>Sealed / revealed</dt><dd>{workspace.sealedOfferCount} / {revealedCount}</dd></div><div><dt>Round finalization</dt><dd>{roundFinalized ? "Finalized" : allOffersRevealed ? "Revealed; receipt pending" : "Pending"}</dd></div><div><dt>Protocol winner</dt><dd>None</dd></div><div><dt>Canonical receipt</dt><dd>{receipt ? receiptVerified ? "Verified" : "Invalid" : "Not exported"}</dd></div></dl>{workspace.mode === "live" && <div className="pilot-actions"><button type="button" className="secondary-action compact" onClick={downloadReceipt} disabled={busy !== null || round?.status.tag !== "Settled"}><FileCheck2 size={15} />Verify + download receipt</button></div>}</section>
               <section className="pilot-result"><div className="pilot-result-heading"><span>OpenX402 evidence</span><strong>AWAITING INTERFACE</strong></div><dl className="pilot-facts"><div><dt>Discovery source</dt><dd>{OPENX402_DISCOVERY_LABEL}</dd></div><div><dt>Selected resource</dt><dd>{selected?.resourceId ?? "Not selected"}</dd></div><div><dt>Real requirement</dt><dd>Not available</dd></div><div><dt>Payment receipt</dt><dd>Not fabricated</dd></div><div><dt>Settlement reference</dt><dd>Not available</dd></div></dl></section>
               <section className="pilot-result"><div className="pilot-result-heading"><span>Trust boundary</span><strong>SEQUENTIAL</strong></div><dl className="pilot-facts"><div><dt>OpenX402</dt><dd>Discovery, resource metadata, payment requirements, verification, settlement</dd></div><div><dt>Sub Rosa</dt><dd>Private offers, deadline, reveal, canonical receipt</dd></div><div><dt>Pilot application</dt><dd>Request, spending cap, validation, selection, handoff</dd></div></dl></section>
             </div>}
@@ -815,7 +832,7 @@ export function OpenX402PilotPage({ goHome }: OpenX402PilotPageProps) {
         <aside className="pilot-panel openx402-sidebar">
           <div className="pilot-panel-heading"><div><span>SCF evidence view</span><h2>Pilot status</h2></div><ShieldCheck size={19} /></div>
           <div className="openx402-sidebar-main">
-            <dl className="pilot-facts"><div><dt>Partner workflow</dt><dd>OpenX402 × Sub Rosa pilot</dd></div><div><dt>Discovery</dt><dd>{workspace.discoveryComplete ? `${workspace.resources.length} sample providers` : "Not run"}</dd></div><div><dt>Buyer spending cap</dt><dd>5 USDC</dd></div><div><dt>Sealed offers</dt><dd>{workspace.sealedOfferCount}</dd></div><div><dt>Reveal result</dt><dd>{roundFinal ? `${revealedCount} offers` : "Private / pending"}</dd></div><div><dt>Selected provider</dt><dd>{selected?.provider ?? "Not selected"}</dd></div><div><dt>Payment handoff</dt><dd>{handoffStatus ?? "Not prepared"}</dd></div></dl>
+            <dl className="pilot-facts"><div><dt>Partner workflow</dt><dd>OpenX402 × Sub Rosa pilot</dd></div><div><dt>Discovery</dt><dd>{workspace.discoveryComplete ? `${workspace.resources.length} sample providers` : "Not run"}</dd></div><div><dt>Buyer spending cap</dt><dd>5 USDC</dd></div><div><dt>Sealed offers</dt><dd>{workspace.sealedOfferCount}</dd></div><div><dt>Reveal result</dt><dd>{offersVisible ? `${revealedCount} / ${workspace.sealedOfferCount} visible` : "Private / pending"}</dd></div><div><dt>Selected provider</dt><dd>{selected?.provider ?? "Not selected"}</dd></div><div><dt>Payment handoff</dt><dd>{handoffStatus ?? "Not prepared"}</dd></div></dl>
             <div className="openx402-status-stack"><span className="status real">{workspace.mode === "live" ? "REAL SUB ROSA" : "DEMO SUB ROSA"}</span><span className="status demo">DEMO DISCOVERY DATA</span><span className="status waiting">AWAITING OPENX402 INTERFACE</span></div>
             <div className="openx402-trust"><strong>v1 scope</strong><p>No private request transport, no invented MCP response, no fake payment success, and no claim of atomic reveal plus settlement.</p></div>
           </div>
